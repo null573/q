@@ -112,12 +112,30 @@ async function calculateDate() {
 
 async function handleCreateOrder(e) {
     e.preventDefault();
+    
+    const calculatedDate = document.getElementById('calculatedDate').value;
+    const queueDate = document.getElementById('queueDate').value;
+    
+    // 校验：F列（排队日期）必须 >= E列（可发货日期）
+    if (calculatedDate && calculatedDate !== '计算中...' && queueDate) {
+        // 尝试解析可发货日期（可能是日期格式或文本如"请联系商务支持"）
+        const calcParts = calculatedDate.match(/(\d{4})-(\d{2})-(\d{2})/);
+        if (calcParts) {
+            const calcDateObj = new Date(calcParts[1], parseInt(calcParts[2]) - 1, calcParts[3]);
+            const queueDateObj = new Date(queueDate);
+            if (queueDateObj < calcDateObj) {
+                showToast('排队日期不能早于可发货日期（' + calculatedDate + '）', 'error');
+                return;
+            }
+        }
+    }
+    
     const orderData = {
         model: document.getElementById('model').value,
         tonnage: document.getElementById('tonnage').value,
         customer: document.getElementById('customer').value,
         expected_date: document.getElementById('expectedDate').value,
-        queue_date: document.getElementById('queueDate').value,
+        queue_date: queueDate,
         submitter: currentUser.name,
         submitter_id: currentUser.id,
         row_index: pendingRowIndex // 如果有预计算行号，则更新该行

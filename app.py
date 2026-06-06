@@ -196,7 +196,7 @@ def get_models():
 
 @app.route('/api/calculate-date', methods=['POST'])
 def calculate_date():
-    """计算可发货日期：找到第一个空行，写入数据（跳过E列），让E列公式自动计算，然后读取结果"""
+    """计算可发货日期：先检查是否有匹配的待提交行，有则复用，无则写入新行"""
     try:
         data = request.json
         model = data.get('model', '')
@@ -204,42 +204,106 @@ def calculate_date():
         customer = data.get('customer', '')
         expected_date = data.get('expected_date', '')
 
-        # 找到第一个空行（1-based）
-        empty_row = get_next_empty_row(SHEET_ID)
-        write_row_idx = empty_row - 1  # 转为0-based
-        serial_no = empty_row - 1
+        # 1. 先检查是否已有匹配的待提交行（A列型号匹配且F列为空）
+        grid_data = read_sheet_range(SHEET_ID, "A1:L200")
+        rows = grid_data.get("rows", [])
+        existing_row = 0  # 1-based
 
-        # 写入数据到空行（跳过E列，不覆盖公式）
-        # 排队日期、提交人等先留空，等用户正式提交时再更新
-        remark = f"{tonnage}{customer}"
-        resp = write_order_row(
-            write_row_idx, model, tonnage, customer, expected_date,
-            "", "", remark, str(serial_no), "", ""
-        )
+        for i in range(2, len(rows)):  # 从第3行开始
+            row = rows[i]
+            values = row.get("values", [])
+            row_data = [parse_cell_value(v.get("cellValue")) for v in values]
+            
+            # 检查A列型号匹配
+            a_val = row_data[0] if len(row_data) > 0 else ""
+            f_val = row_data[5] if len(row_data) > 5 else ""  # F列排队日期
+            
+            if a_val == model and not f_val.strip():
+                existing_row = i + 1  # 1-based
+                break
+
+        if existing_row > 0:
+            # 复用已有行：更新A-D列数据（跳过E列）
+            write_row_idx = existing_row - 1
+            remark = f"{tonnage}{customer}"
+            # 只更新A-D列
+            body = {
+                "requests": [{
+                    "updateRangeRequest": {
+                        "sheetId": SHEET_ID,
+                        "gridData": {
+                            "startRow": write_row_idx,
+                            "startColumn": 0,
+                            "rows": [{"values": [
+                                build_cell_value(model),
+                                build_cell_value(tonnage),
+                                build_cell_value(customer),
+                                build_cell_value(expected_date, is_date=True),
+                            ]}]
+                        }
+                    }
+                }]
+            }
+            resp = batch_update(body)
+            target_row = existing_row
+        else:
+            # 新建行
+            empty_row = get_next_empty_row(SHEET_ID)
+            write_row_idx = empty_row - 1
+            serial_no = write_row_idx
+            remark = f"{tonnage}{customer}"
+            resp = write_order_row(
+                write_row_idx, model, tonnage, customer, expected_date,
+                "", "", remark, str(serial_no), "", ""
+            )
+            target_row = empty_row
+
         result = resp.json()
 
         if "responses" not in result:
             return jsonify({"success": False, "error": f"写入数据失败: {json.dumps(result, ensure_ascii=False)}"})
 
-        # 等待公式计算
+        # 读取E列计算结果（尝试多种方式）
         import time
         time.sleep(2)
-
-        # 读取E列计算结果
-        grid_data = read_sheet_range(SHEET_ID, f"E{empty_row}:E{empty_row}")
-        rows = grid_data.get("rows", [])
+        
         calculated_date = ""
-        if rows:
-            for v in rows[0].get("values", []):
+        
+        # 方式1：直接读取E列
+        e_data = read_sheet_range(SHEET_ID, f"E{target_row}:E{target_row}")
+        e_rows = e_data.get("rows", [])
+        if e_rows:
+            for v in e_rows[0].get("values", []):
                 cv = v.get("cellValue")
                 if cv:
                     calculated_date = parse_cell_value(cv)
+        
+        # 方式2：如果直接读取为空，尝试读取整行
+        if not calculated_date:
+            full_data = read_sheet_range(SHEET_ID, f"A{target_row}:L{target_row}")
+            full_rows = full_data.get("rows", [])
+            if full_rows:
+                values = full_rows[0].get("values", [])
+                if len(values) > 4:
+                    cv = values[4].get("cellValue")
+                    if cv:
+                        calculated_date = parse_cell_value(cv)
+        
+        # 方式3：如果还是为空，再等2秒重试一次
+        if not calculated_date:
+            time.sleep(2)
+            e_data2 = read_sheet_range(SHEET_ID, f"E{target_row}:E{target_row}")
+            e_rows2 = e_data2.get("rows", [])
+            if e_rows2:
+                for v in e_rows2[0].get("values", []):
+                    cv = v.get("cellValue")
+                    if cv:
+                        calculated_date = parse_cell_value(cv)
 
-        # 返回计算结果和行号，前端正式提交时用这个行号更新
         return jsonify({
             "success": True,
             "calculated_date": calculated_date,
-            "row_index": empty_row  # 1-based行号，供正式提交时更新
+            "row_index": target_row
         })
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
