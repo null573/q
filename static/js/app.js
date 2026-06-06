@@ -352,11 +352,13 @@ async function calculateDateForEdit() {
     calcBtn.textContent = '计算中...';
     calcBtn.disabled = true;
 
+    const rowIndex = parseInt(document.getElementById('editRowIndex').value) || 0;
+
     try {
         const response = await fetch(`${API_BASE}/api/calculate-date`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model, tonnage, customer, expected_date: expectedDate })
+            body: JSON.stringify({ model, tonnage, customer, expected_date: expectedDate, pending_row_index: rowIndex })
         });
         const data = await response.json();
         if (data.success) {

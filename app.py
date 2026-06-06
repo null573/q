@@ -230,20 +230,10 @@ def calculate_date():
         expected_date = data.get('expected_date', '')
         pending_row_index = data.get('pending_row_index', 0)  # 前端已有的待提交行号
 
-        # 1. 优先复用前端传来的待提交行（用户修改型号等字段时复用同一行）
-        existing_row = 0  # 1-based
+        # 1. 优先复用前端传来的行号（pending_row_index 是前端当前正在编辑的行）
+        existing_row = pending_row_index if pending_row_index > 0 else 0
 
-        if pending_row_index > 0:
-            # 检查该行是否属于当前用户（K列 submitter_id 匹配）
-            check_data = read_sheet_range(SHEET_ID, f"A{pending_row_index}:K{pending_row_index}")
-            check_rows = check_data.get("rows", [])
-            if check_rows:
-                check_values = [parse_cell_value(v.get("cellValue")) for v in check_rows[0].get("values", [])]
-                row_submitter_id = check_values[10] if len(check_values) > 10 else ""
-                if row_submitter_id and row_submitter_id == data.get('submitter_id', ''):
-                    existing_row = pending_row_index
-
-        # 2. 如果前端没有待提交行，再按型号查找
+        # 2. 如果前端没有传来行号，再按型号查找未提交的待处理行
         if existing_row == 0:
             batch_size = 50
             for offset in range(0, 200, batch_size):
