@@ -55,11 +55,20 @@ function populateModelSelect(selectId, models) {
 function setupEventListeners() {
     document.getElementById('orderForm').addEventListener('submit', handleCreateOrder);
     document.getElementById('editForm').addEventListener('submit', handleUpdateOrder);
+    // 创建页面自动计算
     const calcFields = ['model', 'tonnage', 'customer', 'expectedDate'];
     calcFields.forEach(fieldId => {
         const field = document.getElementById(fieldId);
         if (field) {
             field.addEventListener('change', debounce(calculateDate, 500));
+        }
+    });
+    // 修改页面自动计算
+    const editCalcFields = ['editModel', 'editTonnage', 'editCustomer', 'editExpectedDate'];
+    editCalcFields.forEach(fieldId => {
+        const field = document.getElementById(fieldId);
+        if (field) {
+            field.addEventListener('change', debounce(calculateDateForEdit, 500));
         }
     });
 }
@@ -83,9 +92,7 @@ async function calculateDate() {
     const expectedDate = document.getElementById('expectedDate').value;
     if (!model || !tonnage || !customer || !expectedDate) return;
 
-    const calcBtn = document.getElementById('calcBtn');
-    calcBtn.textContent = '计算中...';
-    calcBtn.disabled = true;
+    document.getElementById('calculatedDate').value = '计算中...';
 
     try {
         const response = await fetch(`${API_BASE}/api/calculate-date`, {
@@ -96,9 +103,9 @@ async function calculateDate() {
         const data = await response.json();
         if (data.success) {
             const calcDate = data.calculated_date || '';
-            document.getElementById('calculatedDate').value = calcDate || '计算中...';
+            document.getElementById('calculatedDate').value = calcDate || '计算失败';
             pendingRowIndex = data.row_index || 0;
-            
+
             // 检查E列结果是否为有效日期
             const isDate = calcDate && calcDate.match(/\d{4}-\d{2}-\d{2}/);
             const queueDateInput = document.getElementById('queueDate');
@@ -106,7 +113,6 @@ async function calculateDate() {
                 // 不是日期（如"请联系商务支持"），把date input替换为text input显示提示
                 const parent = queueDateInput.parentNode;
                 queueDateInput.style.display = 'none';
-                // 移除已有的提示元素
                 const oldHint = parent.querySelector('.queue-date-hint');
                 if (oldHint) oldHint.remove();
                 const hint = document.createElement('input');
@@ -122,7 +128,7 @@ async function calculateDate() {
                 queueDateInput.disabled = false;
                 queueDateInput.style.background = '';
                 queueDateInput.style.color = '';
-                queueDateInput.value = calcDate; // 默认等于可发货日期
+                queueDateInput.value = calcDate;
                 const oldHint = queueDateInput.parentNode.querySelector('.queue-date-hint');
                 if (oldHint) oldHint.remove();
             } else {
@@ -131,18 +137,13 @@ async function calculateDate() {
                 const oldHint = queueDateInput.parentNode.querySelector('.queue-date-hint');
                 if (oldHint) oldHint.remove();
             }
-            
-            showToast('可发货日期已更新' + (pendingRowIndex ? ' (行号:' + pendingRowIndex + ')' : ''), 'success');
         } else {
-            showToast('计算失败: ' + data.error, 'error');
+            document.getElementById('calculatedDate').value = '计算失败';
             pendingRowIndex = 0;
         }
     } catch (error) {
-        showToast('网络错误', 'error');
+        document.getElementById('calculatedDate').value = '计算失败';
         pendingRowIndex = 0;
-    } finally {
-        calcBtn.textContent = '计算可发货日期';
-        calcBtn.disabled = false;
     }
 }
 
@@ -343,14 +344,9 @@ async function calculateDateForEdit() {
     const tonnage = document.getElementById('editTonnage').value;
     const customer = document.getElementById('editCustomer').value;
     const expectedDate = document.getElementById('editExpectedDate').value;
-    if (!model || !tonnage || !customer || !expectedDate) {
-        showToast('请先填写型号、吨位、客户和期望发货日期', 'error');
-        return;
-    }
+    if (!model || !tonnage || !customer || !expectedDate) return;
 
-    const calcBtn = document.getElementById('editCalcBtn');
-    calcBtn.textContent = '计算中...';
-    calcBtn.disabled = true;
+    document.getElementById('editCalculatedDate').value = '计算中...';
 
     const rowIndex = parseInt(document.getElementById('editRowIndex').value) || 0;
 
@@ -363,23 +359,18 @@ async function calculateDateForEdit() {
         const data = await response.json();
         if (data.success) {
             const calcDate = data.calculated_date || '';
-            document.getElementById('editCalculatedDate').value = calcDate || '计算中...';
+            document.getElementById('editCalculatedDate').value = calcDate || '计算失败';
 
             const isDate = calcDate && calcDate.match(/\d{4}-\d{2}-\d{2}/);
             if (isDate) {
-                // 重新计算后，排队日期默认等于新的可发货日期
                 document.getElementById('editQueueDate').value = calcDate;
                 document.getElementById('editDateHint').textContent = '';
             }
-            showToast('可发货日期已更新', 'success');
         } else {
-            showToast('计算失败: ' + data.error, 'error');
+            document.getElementById('editCalculatedDate').value = '计算失败';
         }
     } catch (error) {
-        showToast('网络错误', 'error');
-    } finally {
-        calcBtn.textContent = '重新计算可发货日期';
-        calcBtn.disabled = false;
+        document.getElementById('editCalculatedDate').value = '计算失败';
     }
 }
 
