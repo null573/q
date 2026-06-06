@@ -231,44 +231,37 @@ function renderOrders(orders) {
         return;
     }
 
-    ordersList.innerHTML = orders.map(order => `
-        <div class="order-card">
-            <div class="order-header">
-                <span class="order-title">${escapeHtml(order.model)}</span>
-                <span class="order-serial">#${order.serial_no || order.row_index}</span>
-            </div>
-            <div class="order-info">
-                <div class="info-item">
-                    <div class="info-label">吨位</div>
-                    <div class="info-value">${escapeHtml(order.tonnage)}</div>
-                </div>
-                <div class="info-item">
-                    <div class="info-label">客户</div>
-                    <div class="info-value">${escapeHtml(order.customer)}</div>
-                </div>
-                <div class="info-item">
-                    <div class="info-label">期望发货日期</div>
-                    <div class="info-value">${escapeHtml(order.expected_date)}</div>
-                </div>
-                <div class="info-item">
-                    <div class="info-label">可发货日期</div>
-                    <div class="info-value">${escapeHtml(order.calculated_date) || '-'}</div>
-                </div>
-                <div class="info-item">
-                    <div class="info-label">排队日期</div>
-                    <div class="info-value">${escapeHtml(order.queue_date)}</div>
-                </div>
-                <div class="info-item">
-                    <div class="info-label">提交时间</div>
-                    <div class="info-value">${escapeHtml(order.submit_time) || '-'}</div>
-                </div>
-            </div>
-            <div class="order-actions">
-                <button class="btn-edit" onclick="openEditModal(${order.row_index})">修改</button>
-                <button class="btn-delete" onclick="deleteOrder(${order.row_index})">删除</button>
-            </div>
-        </div>
-    `).join('');
+    let html = `<table class="order-table">
+        <thead>
+            <tr>
+                <th>型号</th>
+                <th>吨位</th>
+                <th>客户</th>
+                <th>期望发货</th>
+                <th>可发货</th>
+                <th>排队日期</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>`;
+
+    orders.forEach(order => {
+        html += `<tr>
+            <td class="td-model">${escapeHtml(order.model)}</td>
+            <td>${escapeHtml(order.tonnage)}</td>
+            <td>${escapeHtml(order.customer)}</td>
+            <td>${escapeHtml(order.expected_date)}</td>
+            <td class="td-calc">${escapeHtml(order.calculated_date) || '-'}</td>
+            <td>${escapeHtml(order.queue_date)}</td>
+            <td class="td-actions">
+                <button class="btn-edit" onclick="openEditModal(${order.row_index})">改</button>
+                <button class="btn-delete" onclick="deleteOrder(${order.row_index})">删</button>
+            </td>
+        </tr>`;
+    });
+
+    html += '</tbody></table>';
+    ordersList.innerHTML = html;
 }
 
 function escapeHtml(text) {

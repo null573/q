@@ -50,10 +50,15 @@ def parse_cell_value(cell_value):
     return ""
 
 
-def build_cell_value(value, is_date=False):
+def build_cell_value(value, is_date=False, is_number=False):
     """构建单元格写入值"""
     if not value or str(value).strip() == "":
         return {"cellValue": {"text": ""}}
+    if is_number:
+        try:
+            return {"cellValue": {"number": float(value)}}
+        except (ValueError, TypeError):
+            pass
     if is_date:
         try:
             parts = str(value).split("-")
@@ -127,9 +132,9 @@ def write_order_row(row_index_0based, model, tonnage, customer, expected_date, q
     """
     # A-D列 (0-3)
     values_left = [
-        build_cell_value(model),           # A: 型号
-        build_cell_value(tonnage),         # B: 吨位
-        build_cell_value(customer),        # C: 客户
+        build_cell_value(model),                        # A: 型号
+        build_cell_value(tonnage, is_number=True),      # B: 吨位（数值）
+        build_cell_value(customer),                      # C: 客户
         build_cell_value(expected_date, is_date=True),  # D: 期望发货日期
     ]
     # F-L列 (5-11) - 跳过E列
@@ -270,7 +275,7 @@ def calculate_date():
                             "startColumn": 0,
                             "rows": [{"values": [
                                 build_cell_value(model),
-                                build_cell_value(tonnage),
+                                build_cell_value(tonnage, is_number=True),
                                 build_cell_value(customer),
                                 build_cell_value(expected_date, is_date=True),
                             ]}]

@@ -201,77 +201,73 @@ body {
 }
 
 .orders-list {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
-.order-card {
+.order-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
     background: #fff;
-    border: 1px solid #e0e0e0;
-    border-radius: 12px;
-    padding: 16px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
 }
 
-.order-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 12px;
-    padding-bottom: 10px;
+.order-table thead {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.order-table th {
+    background: #f0f2f5;
+    color: #555;
+    font-weight: 600;
+    padding: 10px 8px;
+    text-align: left;
+    white-space: nowrap;
+    border-bottom: 2px solid #e0e0e0;
+    font-size: 12px;
+}
+
+.order-table td {
+    padding: 10px 8px;
     border-bottom: 1px solid #f0f0f0;
+    color: #333;
+    vertical-align: middle;
 }
 
-.order-title {
-    font-size: 16px;
+.order-table tbody tr:hover {
+    background: #f8f9ff;
+}
+
+.order-table tbody tr:active {
+    background: #eef1ff;
+}
+
+.td-model {
     font-weight: 600;
     color: #333;
+    white-space: nowrap;
 }
 
-.order-serial {
-    font-size: 12px;
-    color: #999;
-    background: #f5f5f5;
-    padding: 4px 10px;
-    border-radius: 20px;
-}
-
-.order-info {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    margin-bottom: 12px;
-}
-
-.info-item {
-    font-size: 13px;
-}
-
-.info-label {
-    color: #999;
-    margin-bottom: 2px;
-}
-
-.info-value {
-    color: #333;
+.td-calc {
+    color: #667eea;
     font-weight: 500;
 }
 
-.order-actions {
-    display: flex;
-    gap: 10px;
+.td-actions {
+    white-space: nowrap;
 }
 
 .btn-edit,
 .btn-delete {
-    flex: 1;
-    padding: 10px;
+    padding: 5px 12px;
     border: none;
-    border-radius: 6px;
-    font-size: 14px;
+    border-radius: 4px;
+    font-size: 12px;
     cursor: pointer;
-    transition: all 0.3s;
+    margin-right: 4px;
+    transition: all 0.2s;
 }
 
 .btn-edit {
@@ -282,6 +278,12 @@ body {
 .btn-delete {
     background: #e74c3c;
     color: white;
+}
+
+.btn-edit:active,
+.btn-delete:active {
+    transform: scale(0.95);
+    opacity: 0.8;
 }
 
 .modal {
