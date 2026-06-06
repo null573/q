@@ -73,9 +73,9 @@ def read_sheet_range(sheet_id, range_str):
     if resp.status_code == 200:
         data = resp.json()
         result = data.get("gridData", {})
-        if not result:
+        if not result or (isinstance(result, dict) and "_debug" in result):
             # 返回原始响应的keys用于debug
-            result["_debug"] = {"keys": list(data.keys()), "raw_preview": str(data)[:500]}
+            return {"_debug": {"keys": list(data.keys()), "raw_preview": str(data)[:500]}}
         return result
     return {"_debug": {"status": resp.status_code, "error": resp.text[:200]}}
 
