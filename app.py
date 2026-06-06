@@ -378,11 +378,11 @@ def get_orders():
         grid_data = read_sheet_range(SHEET_ID, "A1:L1000")
         rows = grid_data.get("rows", [])
         
-        # debug info
         debug_info = {
             "grid_data_keys": list(grid_data.keys()) if grid_data else "empty",
             "total_rows": len(rows),
-            "first_row_values": len(rows[0].get("values", [])) if rows else 0
+            "first_row_values": len(rows[0].get("values", [])) if rows else 0,
+            "raw_preview": str(grid_data.get("_debug", {}))[:300] if "_debug" in grid_data else "has gridData"
         }
         
         orders = []
