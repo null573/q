@@ -102,16 +102,27 @@ async function calculateDate() {
             const isDate = calcDate && calcDate.match(/\d{4}-\d{2}-\d{2}/);
             const queueDateInput = document.getElementById('queueDate');
             if (!isDate && calcDate) {
-                // 不是日期（如"请联系商务支持"），禁用F列
-                queueDateInput.value = '请联系商务支持';
-                queueDateInput.disabled = true;
-                queueDateInput.style.background = '#f8f9fa';
-                queueDateInput.style.color = '#e74c3c';
+                // 不是日期（如"请联系商务支持"），把date input替换为text input显示提示
+                const parent = queueDateInput.parentNode;
+                queueDateInput.style.display = 'none';
+                // 移除已有的提示元素
+                const oldHint = parent.querySelector('.queue-date-hint');
+                if (oldHint) oldHint.remove();
+                const hint = document.createElement('input');
+                hint.type = 'text';
+                hint.className = 'queue-date-hint';
+                hint.value = '请联系商务支持';
+                hint.disabled = true;
+                hint.style.cssText = 'width:100%;padding:12px 15px;border:1px solid #ddd;border-radius:8px;font-size:15px;background:#fff0f0;color:#e74c3c;font-weight:500;';
+                parent.insertBefore(hint, queueDateInput.nextSibling);
             } else {
-                // 是有效日期，恢复F列
+                // 是有效日期，恢复date input
+                queueDateInput.style.display = '';
                 queueDateInput.disabled = false;
                 queueDateInput.style.background = '';
                 queueDateInput.style.color = '';
+                const oldHint = queueDateInput.parentNode.querySelector('.queue-date-hint');
+                if (oldHint) oldHint.remove();
             }
             
             showToast('可发货日期已更新' + (pendingRowIndex ? ' (行号:' + pendingRowIndex + ')' : ''), 'success');
