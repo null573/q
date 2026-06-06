@@ -430,7 +430,7 @@ def get_orders():
             }
             orders.append(order)
 
-        return jsonify({"success": True, "orders": orders})
+        return jsonify({"success": True, "orders": orders, "debug_total_rows": len(rows), "debug_scanned": sum(1 for r in rows[1:] if r.get("values"))})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
