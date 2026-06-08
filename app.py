@@ -29,10 +29,12 @@ ACCESS_PASSWORD = os.environ.get('ACCESS_PASSWORD', 'queue2025')
 # ============ 授权中间件 ============
 
 def require_auth(f):
-    """装饰器：检查session中是否已通过密码验证"""
+    """装饰器：检查请求头中是否携带正确的访问密码"""
     @functools.wraps(f)
     def decorated(*args, **kwargs):
-        if not session.get('authenticated'):
+        # 优先从请求头获取密码
+        password = request.headers.get('X-Access-Password', '')
+        if password != ACCESS_PASSWORD:
             return jsonify({"success": False, "error": "未授权", "need_auth": True}), 401
         return f(*args, **kwargs)
     return decorated
@@ -42,28 +44,21 @@ def require_auth(f):
 
 @app.route('/auth/check')
 def auth_check():
-    """检查当前用户是否已通过密码验证"""
-    if session.get('authenticated'):
+    """检查密码是否正确"""
+    password = request.headers.get('X-Access-Password', '')
+    if password == ACCESS_PASSWORD:
         return jsonify({"authorized": True})
     return jsonify({"authorized": False})
 
 
 @app.route('/auth/login', methods=['POST'])
 def auth_login():
-    """密码验证登录"""
+    """密码验证"""
     data = request.json
     password = data.get('password', '')
     if password == ACCESS_PASSWORD:
-        session['authenticated'] = True
         return jsonify({"success": True})
     return jsonify({"success": False, "error": "密码错误"})
-
-
-@app.route('/auth/logout', methods=['POST'])
-def auth_logout():
-    """退出登录"""
-    session.clear()
-    return jsonify({"success": True})
 
 
 def get_headers():

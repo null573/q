@@ -4,19 +4,39 @@ let modelOptions = [];
 let pendingRowIndex = 0;
 const API_BASE = '';
 
+// 从localStorage读取密码
+let accessPassword = localStorage.getItem('accessPassword') || '';
+
+// 所有API请求自动带上密码头
+function apiFetch(url, options = {}) {
+    options.headers = options.headers || {};
+    if (accessPassword) {
+        options.headers['X-Access-Password'] = accessPassword;
+    }
+    return fetch(url, options);
+}
+
 document.addEventListener('DOMContentLoaded', function() {
-    // 检查是否已授权
-    fetch(`${API_BASE}/auth/check`, { credentials: 'include' })
+    if (accessPassword) {
+        // 有密码，验证是否有效
+        fetch(`${API_BASE}/auth/check`, {
+            headers: { 'X-Access-Password': accessPassword }
+        })
         .then(r => r.json())
         .then(data => {
             if (data.authorized) {
                 hideAuthOverlay();
                 initApp();
             } else {
+                accessPassword = '';
+                localStorage.removeItem('accessPassword');
                 showAuthOverlay();
             }
         })
         .catch(() => showAuthOverlay('网络错误，请重试'));
+    } else {
+        showAuthOverlay();
+    }
 });
 
 function showAuthOverlay(errorMsg) {
@@ -37,12 +57,13 @@ function doAuth() {
     fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
-        credentials: 'include'
+        body: JSON.stringify({ password })
     })
     .then(r => r.json())
     .then(data => {
         if (data.success) {
+            accessPassword = password;
+            localStorage.setItem('accessPassword', password);
             hideAuthOverlay();
             initApp();
         } else {
