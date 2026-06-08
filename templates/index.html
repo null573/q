@@ -12,9 +12,9 @@
             <div class="auth-icon">🔒</div>
             <h2>需要授权访问</h2>
             <p>本系统仅限授权用户使用</p>
-            <p class="auth-hint">请输入访问密码</p>
+            <p class="auth-hint">请输入您的微信名</p>
             <div class="auth-form">
-                <input type="password" id="authPassword" placeholder="请输入访问密码" onkeydown="if(event.key==='Enter')doAuth()">
+                <input type="text" id="authWechatName" placeholder="请输入微信名" onkeydown="if(event.key==='Enter')doAuth()">
                 <button onclick="doAuth()">登 录</button>
             </div>
             <p class="auth-error" id="authError"></p>

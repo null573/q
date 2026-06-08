@@ -22,20 +22,54 @@ OPEN_ID = os.environ.get('OPEN_ID', '9bc172e5338147d8a35c1438ea8d1577')
 
 BASE_URL = "https://docs.qq.com/openapi/spreadsheet/v3"
 
-# 访问密码（仅授权用户可知）
-ACCESS_PASSWORD = os.environ.get('ACCESS_PASSWORD', 'queue2025')
+# ============ 授权：微信名白名单 ============
+
+# 缓存微信名白名单（避免每次请求都读表格）
+_whitelist_cache = []
+_whitelist_cache_time = 0
+WHITELIST_CACHE_TTL = 300  # 缓存5分钟
+
+
+def get_wechat_whitelist():
+    """从表格Sheet 000008的C列读取微信名白名单"""
+    global _whitelist_cache, _whitelist_cache_time
+    import time
+    now = time.time()
+    if _whitelist_cache and (now - _whitelist_cache_time) < WHITELIST_CACHE_TTL:
+        return _whitelist_cache
+
+    names = []
+    try:
+        grid_data = read_sheet_range(MODEL_SHEET_ID, "C1:C50")
+        rows = grid_data.get("rows", [])
+        for row in rows:
+            for v in row.get("values", []):
+                cv = v.get("cellValue")
+                if cv:
+                    name = cv.get("text", str(cv)) if isinstance(cv, dict) else str(cv)
+                    name = name.strip()
+                    if name:
+                        names.append(name)
+    except Exception as e:
+        print(f"读取白名单失败: {e}")
+
+    _whitelist_cache = names
+    _whitelist_cache_time = now
+    return names
 
 
 # ============ 授权中间件 ============
 
 def require_auth(f):
-    """装饰器：检查请求头中是否携带正确的访问密码"""
+    """装饰器：检查请求头中的微信名是否在白名单中"""
     @functools.wraps(f)
     def decorated(*args, **kwargs):
-        # 优先从请求头获取密码
-        password = request.headers.get('X-Access-Password', '')
-        if password != ACCESS_PASSWORD:
+        wechat_name = request.headers.get('X-Wechat-Name', '')
+        if not wechat_name:
             return jsonify({"success": False, "error": "未授权", "need_auth": True}), 401
+        whitelist = get_wechat_whitelist()
+        if wechat_name not in whitelist:
+            return jsonify({"success": False, "error": "无权访问", "need_auth": True}), 403
         return f(*args, **kwargs)
     return decorated
 
@@ -44,21 +78,27 @@ def require_auth(f):
 
 @app.route('/auth/check')
 def auth_check():
-    """检查密码是否正确"""
-    password = request.headers.get('X-Access-Password', '')
-    if password == ACCESS_PASSWORD:
-        return jsonify({"authorized": True})
+    """检查微信名是否在白名单中"""
+    wechat_name = request.headers.get('X-Wechat-Name', '')
+    if not wechat_name:
+        return jsonify({"authorized": False})
+    whitelist = get_wechat_whitelist()
+    if wechat_name in whitelist:
+        return jsonify({"authorized": True, "name": wechat_name})
     return jsonify({"authorized": False})
 
 
 @app.route('/auth/login', methods=['POST'])
 def auth_login():
-    """密码验证"""
+    """微信名验证"""
     data = request.json
-    password = data.get('password', '')
-    if password == ACCESS_PASSWORD:
-        return jsonify({"success": True})
-    return jsonify({"success": False, "error": "密码错误"})
+    wechat_name = data.get('wechat_name', '').strip()
+    if not wechat_name:
+        return jsonify({"success": False, "error": "请输入微信名"})
+    whitelist = get_wechat_whitelist()
+    if wechat_name in whitelist:
+        return jsonify({"success": True, "name": wechat_name})
+    return jsonify({"success": False, "error": "无权访问，请联系管理员"})
 
 
 def get_headers():

@@ -4,32 +4,33 @@ let modelOptions = [];
 let pendingRowIndex = 0;
 const API_BASE = '';
 
-// 从localStorage读取密码
-let accessPassword = localStorage.getItem('accessPassword') || '';
+// 从localStorage读取微信名
+let wechatName = localStorage.getItem('wechatName') || '';
 
-// 所有API请求自动带上密码头
+// 所有API请求自动带上微信名头
 function apiFetch(url, options = {}) {
     options.headers = options.headers || {};
-    if (accessPassword) {
-        options.headers['X-Access-Password'] = accessPassword;
+    if (wechatName) {
+        options.headers['X-Wechat-Name'] = wechatName;
     }
     return fetch(url, options);
 }
 
 document.addEventListener('DOMContentLoaded', function() {
-    if (accessPassword) {
-        // 有密码，验证是否有效
+    if (wechatName) {
+        // 有微信名，验证是否在白名单中
         fetch(`${API_BASE}/auth/check`, {
-            headers: { 'X-Access-Password': accessPassword }
+            headers: { 'X-Wechat-Name': wechatName }
         })
         .then(r => r.json())
         .then(data => {
             if (data.authorized) {
                 hideAuthOverlay();
+                currentUser.name = data.name || wechatName;
                 initApp();
             } else {
-                accessPassword = '';
-                localStorage.removeItem('accessPassword');
+                wechatName = '';
+                localStorage.removeItem('wechatName');
                 showAuthOverlay();
             }
         })
@@ -49,25 +50,26 @@ function hideAuthOverlay() {
 }
 
 function doAuth() {
-    const password = document.getElementById('authPassword').value.trim();
-    if (!password) {
-        document.getElementById('authError').textContent = '请输入密码';
+    const name = document.getElementById('authWechatName').value.trim();
+    if (!name) {
+        document.getElementById('authError').textContent = '请输入微信名';
         return;
     }
     fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password })
+        body: JSON.stringify({ wechat_name: name })
     })
     .then(r => r.json())
     .then(data => {
         if (data.success) {
-            accessPassword = password;
-            localStorage.setItem('accessPassword', password);
+            wechatName = name;
+            localStorage.setItem('wechatName', name);
+            currentUser.name = data.name || name;
             hideAuthOverlay();
             initApp();
         } else {
-            document.getElementById('authError').textContent = data.error || '密码错误';
+            document.getElementById('authError').textContent = data.error || '无权访问';
         }
     })
     .catch(() => {
