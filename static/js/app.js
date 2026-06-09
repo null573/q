@@ -4,69 +4,34 @@ let modelOptions = [];
 let pendingRowIndex = 0;
 const API_BASE = '';
 
-// 从localStorage读取微信名
-let wechatName = localStorage.getItem('wechatName') || '';
+// 从localStorage读取密码
+let accessPassword = localStorage.getItem('accessPassword') || '';
 
-// 所有API请求自动带上微信名头
+// 所有API请求自动带上密码头
 function apiFetch(url, options = {}) {
     options.headers = options.headers || {};
-    if (wechatName) {
-        options.headers['X-Wechat-Name'] = wechatName;
+    if (accessPassword) {
+        options.headers['X-Access-Password'] = accessPassword;
     }
     return fetch(url, options);
 }
 
 document.addEventListener('DOMContentLoaded', function() {
-    // 检查URL参数（OAuth回调）
-    const urlParams = new URLSearchParams(window.location.search);
-    const nick = urlParams.get('nick');
-    const authError = urlParams.get('auth_error');
-
-    if (authError) {
-        showAuthOverlay();
-        document.getElementById('oauthError').textContent = '授权失败，请重试或使用手动输入';
-        return;
-    }
-
-    if (nick) {
-        // OAuth授权成功，用昵称作为微信名验证
-        wechatName = nick;
-        localStorage.setItem('wechatName', nick);
+    if (accessPassword) {
+        // 有密码，自动验证
         fetch(`${API_BASE}/auth/check`, {
-            headers: { 'X-Wechat-Name': wechatName }
+            headers: { 'X-Access-Password': accessPassword }
         })
         .then(r => r.json())
         .then(data => {
             if (data.authorized) {
                 hideAuthOverlay();
-                currentUser.name = data.name || wechatName;
                 initApp();
             } else {
-                wechatName = '';
-                localStorage.removeItem('wechatName');
-                showAuthOverlay();
-                document.getElementById('oauthError').textContent = '您的微信账号不在授权列表中';
-            }
-        })
-        .catch(() => showAuthOverlay('网络错误，请重试'));
-        return;
-    }
-
-    if (wechatName) {
-        // 有微信名，验证是否在白名单中
-        fetch(`${API_BASE}/auth/check`, {
-            headers: { 'X-Wechat-Name': wechatName }
-        })
-        .then(r => r.json())
-        .then(data => {
-            if (data.authorized) {
-                hideAuthOverlay();
-                currentUser.name = data.name || wechatName;
-                initApp();
-            } else {
-                wechatName = '';
-                localStorage.removeItem('wechatName');
-                showAuthOverlay();
+                // 密码已变更，清除并弹出登录
+                accessPassword = '';
+                localStorage.removeItem('accessPassword');
+                showAuthOverlay('密码已变更，请重新输入');
             }
         })
         .catch(() => showAuthOverlay('网络错误，请重试'));
@@ -84,52 +49,26 @@ function hideAuthOverlay() {
     document.getElementById('authOverlay').style.display = 'none';
 }
 
-function showManualInput() {
-    document.getElementById('authMainPanel').style.display = 'none';
-    document.getElementById('authManualPanel').style.display = 'block';
-}
-
-function showOAuthPanel() {
-    document.getElementById('authMainPanel').style.display = 'block';
-    document.getElementById('authManualPanel').style.display = 'none';
-}
-
-function doOAuthAuth() {
-    fetch(`${API_BASE}/auth/oauth-url`)
-    .then(r => r.json())
-    .then(data => {
-        if (data.success && data.url) {
-            window.location.href = data.url;
-        } else {
-            document.getElementById('oauthError').textContent = data.error || '获取授权链接失败，请使用手动输入';
-        }
-    })
-    .catch(() => {
-        document.getElementById('oauthError').textContent = '网络错误，请使用手动输入';
-    });
-}
-
 function doAuth() {
-    const name = document.getElementById('authWechatName').value.trim();
-    if (!name) {
-        document.getElementById('authError').textContent = '请输入微信名';
+    const password = document.getElementById('authPassword').value.trim();
+    if (!password) {
+        document.getElementById('authError').textContent = '请输入密码';
         return;
     }
     fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wechat_name: name })
+        body: JSON.stringify({ password })
     })
     .then(r => r.json())
     .then(data => {
         if (data.success) {
-            wechatName = name;
-            localStorage.setItem('wechatName', name);
-            currentUser.name = data.name || name;
+            accessPassword = password;
+            localStorage.setItem('accessPassword', password);
             hideAuthOverlay();
             initApp();
         } else {
-            document.getElementById('authError').textContent = data.error || '无权访问';
+            document.getElementById('authError').textContent = data.error || '密码错误';
         }
     })
     .catch(() => {

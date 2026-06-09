@@ -202,7 +202,7 @@ body {
 
 .auth-btn-wechat {
     padding: 14px 32px;
-    background: #07c160;
+    background: #667eea;
     color: white;
     border: none;
     border-radius: 8px;
@@ -210,14 +210,6 @@ body {
     font-weight: 500;
     cursor: pointer;
     width: 100%;
-}
-
-.auth-switch {
-    color: #667eea;
-    font-size: 13px;
-    margin-top: 16px;
-    cursor: pointer;
-    text-decoration: underline;
 }
 
 .auth-form {

@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, abort, session, redirect
+from flask import Flask, render_template, request, jsonify, abort
 from flask_cors import CORS
 import requests
 import json
@@ -8,7 +8,7 @@ import functools
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
-CORS(app, supports_credentials=True)
+CORS(app)
 
 # 腾讯表格配置
 FILE_ID = "DRkR6aXhGcWxLYVFR"
@@ -21,64 +21,20 @@ ACCESS_TOKEN = os.environ.get('ACCESS_TOKEN', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXV
 OPEN_ID = os.environ.get('OPEN_ID', '9bc172e5338147d8a35c1438ea8d1577')
 
 BASE_URL = "https://docs.qq.com/openapi/spreadsheet/v3"
-OAUTH_BASE = "https://docs.qq.com/oauth/v2"
 
-# OAuth 配置（需要用户在腾讯文档开放平台配置回调地址）
-APP_CLIENT_ID = os.environ.get('APP_CLIENT_ID', CLIENT_ID)
-APP_CLIENT_SECRET = os.environ.get('APP_CLIENT_SECRET', '')
-REDIRECT_URI = os.environ.get('REDIRECT_URI', 'https://queue-system-b.onrender.com/auth/callback')
-
-# ============ 授权：微信名白名单 ============
-
-# 缓存微信名白名单（避免每次请求都读表格）
-_whitelist_cache = []
-_whitelist_cache_time = 0
-WHITELIST_CACHE_TTL = 300  # 缓存5分钟
-
-
-# 授权表sheetId
-AUTH_SHEET_ID = "ceccgn"
-
-def get_wechat_whitelist():
-    """从授权表ceccgn的A列读取微信名白名单（跳过表头）"""
-    global _whitelist_cache, _whitelist_cache_time
-    import time
-    now = time.time()
-    if _whitelist_cache and (now - _whitelist_cache_time) < WHITELIST_CACHE_TTL:
-        return _whitelist_cache
-
-    names = []
-    try:
-        grid_data = read_sheet_range(AUTH_SHEET_ID, "A2:A50")
-        rows = grid_data.get("rows", [])
-        for row in rows:
-            for v in row.get("values", []):
-                cv = v.get("cellValue")
-                if cv:
-                    name = cv.get("text", str(cv)) if isinstance(cv, dict) else str(cv)
-                    name = name.strip()
-                    if name:
-                        names.append(name)
-    except Exception as e:
-        print(f"读取白名单失败: {e}")
-
-    _whitelist_cache = names
-    _whitelist_cache_time = now
-    return names
+# 访问密码
+ACCESS_PASSWORD = os.environ.get('ACCESS_PASSWORD', 'queue2025')
 
 
 # ============ 授权中间件 ============
 
 def require_auth(f):
-    """装饰器：检查请求头中的微信名是否在白名单中"""
+    """装饰器：检查请求头中的密码是否正确"""
     @functools.wraps(f)
     def decorated(*args, **kwargs):
-        wechat_name = request.headers.get('X-Wechat-Name', '')
-        if not wechat_name:
+        password = request.headers.get('X-Access-Password', '')
+        if password != ACCESS_PASSWORD:
             return jsonify({"success": False, "error": "未授权", "need_auth": True}), 401
-        whitelist = get_wechat_whitelist()
-        if wechat_name not in whitelist:
-            return jsonify({"success": False, "error": "无权访问", "need_auth": True}), 403
         return f(*args, **kwargs)
     return decorated
 
@@ -87,102 +43,21 @@ def require_auth(f):
 
 @app.route('/auth/check')
 def auth_check():
-    """检查微信名是否在白名单中"""
-    wechat_name = request.headers.get('X-Wechat-Name', '')
-    if not wechat_name:
-        return jsonify({"authorized": False})
-    whitelist = get_wechat_whitelist()
-    if wechat_name in whitelist:
-        return jsonify({"authorized": True, "name": wechat_name})
+    """检查密码是否正确"""
+    password = request.headers.get('X-Access-Password', '')
+    if password == ACCESS_PASSWORD:
+        return jsonify({"authorized": True})
     return jsonify({"authorized": False})
 
 
 @app.route('/auth/login', methods=['POST'])
 def auth_login():
-    """微信名验证"""
+    """密码验证"""
     data = request.json
-    wechat_name = data.get('wechat_name', '').strip()
-    if not wechat_name:
-        return jsonify({"success": False, "error": "请输入微信名"})
-    whitelist = get_wechat_whitelist()
-    if wechat_name in whitelist:
-        return jsonify({"success": True, "name": wechat_name})
-    return jsonify({"success": False, "error": "无权访问，请联系管理员"})
-
-
-# ============ OAuth 路由 ============
-
-@app.route('/auth/oauth-url')
-def auth_oauth_url():
-    """获取腾讯文档OAuth授权链接"""
-    if not APP_CLIENT_SECRET:
-        return jsonify({"success": False, "error": "未配置Client Secret，请联系管理员"})
-    auth_url = (
-        f"{OAUTH_BASE}/authorize"
-        f"?client_id={APP_CLIENT_ID}"
-        f"&redirect_uri={REDIRECT_URI}"
-        f"&response_type=code"
-        f"&scope=all"
-        f"&state=queue_system"
-    )
-    return jsonify({"success": True, "url": auth_url})
-
-
-@app.route('/auth/callback')
-def auth_callback():
-    """OAuth回调：用code换取access_token和用户信息"""
-    code = request.args.get('code')
-    if not code:
-        return redirect('/?auth_error=no_code')
-
-    try:
-        # 用code换取token
-        token_resp = requests.get(f"{OAUTH_BASE}/token", params={
-            'client_id': APP_CLIENT_ID,
-            'client_secret': APP_CLIENT_SECRET,
-            'redirect_uri': REDIRECT_URI,
-            'grant_type': 'authorization_code',
-            'code': code
-        }, timeout=30)
-
-        token_data = token_resp.json()
-        user_access_token = token_data.get('access_token')
-        user_open_id = token_data.get('user_id')
-
-        if not user_access_token or not user_open_id:
-            return redirect('/?auth_error=token_failed')
-
-        # 获取用户昵称
-        nick = ''
-        try:
-            userinfo_resp = requests.get(f"{OAUTH_BASE}/userinfo", params={
-                'access_token': user_access_token
-            }, timeout=10)
-            userinfo = userinfo_resp.json()
-            nick = userinfo.get('data', {}).get('nick', '')
-        except:
-            pass
-
-        # 存入session
-        session['user_access_token'] = user_access_token
-        session['user_open_id'] = user_open_id
-        session['user_nick'] = nick
-
-        # 重定向到首页，带上用户信息
-        return redirect(f"/?nick={nick}&open_id={user_open_id}")
-
-    except Exception as e:
-        return redirect(f'/?auth_error={str(e)}')
-
-
-@app.route('/auth/userinfo')
-def auth_userinfo():
-    """获取当前登录用户的OAuth信息"""
-    nick = session.get('user_nick', '')
-    open_id = session.get('user_open_id', '')
-    if nick and open_id:
-        return jsonify({"success": True, "nick": nick, "open_id": open_id})
-    return jsonify({"success": False, "error": "未登录"})
+    password = data.get('password', '')
+    if password == ACCESS_PASSWORD:
+        return jsonify({"success": True})
+    return jsonify({"success": False, "error": "密码错误"})
 
 
 def get_headers():
