@@ -86,8 +86,10 @@ function initApp() {
     loadModels();
     setupEventListeners();
     setupEditQueueDateListener();
-    // 刷新页面时清除上次未提交的表单数据
-    document.getElementById('orderForm').reset();
+    // 刷新页面时强制清除所有表单数据（防止浏览器autofill恢复）
+    document.getElementById('model').value = '';
+    document.getElementById('tonnage').value = '';
+    document.getElementById('customer').value = '';
     document.getElementById('calculatedDate').value = '';
     pendingRowIndex = 0;
     // 期望发货日期默认为次日
