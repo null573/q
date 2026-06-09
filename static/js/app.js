@@ -76,14 +76,26 @@ function doAuth() {
     });
 }
 
+// 未提交订单的临时数据（页面关闭/刷新时清除）
+let draftOrder = null;
+let lastActivityTime = Date.now();
+const IDLE_TIMEOUT = 5 * 60 * 1000; // 5分钟无操作强制退出
+
 function initApp() {
     document.getElementById('userName').textContent = currentUser.name;
     loadModels();
     setupEventListeners();
     setupEditQueueDateListener();
-    const today = new Date().toISOString().split('T')[0];
-    document.getElementById('expectedDate').value = today;
-    document.getElementById('queueDate').value = today;
+    // 期望发货日期默认为次日
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().split('T')[0];
+    document.getElementById('expectedDate').value = tomorrowStr;
+    document.getElementById('queueDate').value = tomorrowStr;
+    // 恢复草稿（如果有）
+    restoreDraft();
+    // 启动无操作检测
+    startIdleTimer();
 }
 
 function initUser() {
@@ -127,6 +139,19 @@ function populateModelSelect(selectId, models) {
 function setupEventListeners() {
     document.getElementById('orderForm').addEventListener('submit', handleCreateOrder);
     document.getElementById('editForm').addEventListener('submit', handleUpdateOrder);
+    // 监听表单字段变化，记录草稿
+    const draftFields = ['model', 'tonnage', 'customer', 'expectedDate', 'queueDate'];
+    draftFields.forEach(fieldId => {
+        const field = document.getElementById(fieldId);
+        if (field) {
+            field.addEventListener('input', saveDraft);
+            field.addEventListener('change', saveDraft);
+        }
+    });
+    // 监听用户操作，记录活动时间
+    ['click', 'keydown', 'scroll', 'touchstart'].forEach(evt => {
+        document.addEventListener(evt, recordActivity, { passive: true });
+    });
     // 创建页面自动计算
     const calcFields = ['model', 'tonnage', 'customer', 'expectedDate'];
     calcFields.forEach(fieldId => {
@@ -273,11 +298,15 @@ async function handleCreateOrder(e) {
         if (data.success) {
             showToast('订单创建成功！', 'success');
             document.getElementById('orderForm').reset();
-            const today = new Date().toISOString().split('T')[0];
-            document.getElementById('expectedDate').value = today;
-            document.getElementById('queueDate').value = today;
+            // 重置为次日
+            const tomorrow = new Date();
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            const tomorrowStr = tomorrow.toISOString().split('T')[0];
+            document.getElementById('expectedDate').value = tomorrowStr;
+            document.getElementById('queueDate').value = tomorrowStr;
             document.getElementById('calculatedDate').value = '';
             pendingRowIndex = 0; // 清空
+            draftOrder = null; // 清除草稿
         } else {
             showToast('创建失败: ' + data.error, 'error');
         }
@@ -296,12 +325,28 @@ async function loadOrders() {
         if (data.success) {
             allOrders = data.orders;
             renderOrders(allOrders);
+            populateFilterModelSelect();
         } else {
             ordersList.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><p>加载失败: ' + data.error + '</p></div>';
         }
     } catch (error) {
         ordersList.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><p>网络错误，请检查连接</p></div>';
     }
+}
+
+function populateFilterModelSelect() {
+    const select = document.getElementById('filterModel');
+    const currentVal = select.value;
+    // 收集所有唯一型号
+    const models = [...new Set(allOrders.map(o => o.model).filter(Boolean))].sort();
+    select.innerHTML = '<option value="">全部型号</option>';
+    models.forEach(model => {
+        const option = document.createElement('option');
+        option.value = model;
+        option.textContent = model;
+        select.appendChild(option);
+    });
+    select.value = currentVal;
 }
 
 function renderOrders(orders) {
@@ -353,15 +398,29 @@ function escapeHtml(text) {
 
 function filterOrders() {
     const keyword = document.getElementById('filterInput').value.toLowerCase();
-    if (!keyword) {
-        renderOrders(allOrders);
-        return;
+    const modelFilter = document.getElementById('filterModel').value;
+    const customerFilter = document.getElementById('filterCustomer').value.toLowerCase();
+
+    let filtered = allOrders;
+
+    if (keyword) {
+        filtered = filtered.filter(order =>
+            (order.model && order.model.toLowerCase().includes(keyword)) ||
+            (order.customer && order.customer.toLowerCase().includes(keyword)) ||
+            (order.tonnage && order.tonnage.toString().includes(keyword))
+        );
     }
-    const filtered = allOrders.filter(order =>
-        (order.model && order.model.toLowerCase().includes(keyword)) ||
-        (order.customer && order.customer.toLowerCase().includes(keyword)) ||
-        (order.tonnage && order.tonnage.toString().includes(keyword))
-    );
+
+    if (modelFilter) {
+        filtered = filtered.filter(order => order.model === modelFilter);
+    }
+
+    if (customerFilter) {
+        filtered = filtered.filter(order =>
+            order.customer && order.customer.toLowerCase().includes(customerFilter)
+        );
+    }
+
     renderOrders(filtered);
 }
 
@@ -545,4 +604,61 @@ function showToast(message, type = 'info') {
 window.onclick = function(event) {
     const modal = document.getElementById('editModal');
     if (event.target === modal) closeEditModal();
+}
+
+// ============ 草稿管理：未提交订单退出页面时清除 ============
+
+function saveDraft() {
+    draftOrder = {
+        model: document.getElementById('model').value,
+        tonnage: document.getElementById('tonnage').value,
+        customer: document.getElementById('customer').value,
+        expectedDate: document.getElementById('expectedDate').value,
+        queueDate: document.getElementById('queueDate').value,
+        calculatedDate: document.getElementById('calculatedDate').value,
+        pendingRowIndex: pendingRowIndex
+    };
+}
+
+function restoreDraft() {
+    // 页面加载时不恢复草稿（刷新/重新进入 = 清除）
+    // 只在页面内切换标签时保留
+    draftOrder = null;
+}
+
+function hasUnsavedOrder() {
+    const model = document.getElementById('model').value;
+    const tonnage = document.getElementById('tonnage').value;
+    const customer = document.getElementById('customer').value;
+    return model || tonnage || customer;
+}
+
+// 页面关闭/刷新前，如果有未提交的订单，清除表单
+window.addEventListener('beforeunload', function(e) {
+    if (hasUnsavedOrder()) {
+        // 清除表单数据，不保存
+        document.getElementById('orderForm').reset();
+    }
+});
+
+// ============ 空闲检测：5分钟无操作强制退出 ============
+
+function recordActivity() {
+    lastActivityTime = Date.now();
+}
+
+function startIdleTimer() {
+    setInterval(() => {
+        const idleTime = Date.now() - lastActivityTime;
+        if (idleTime >= IDLE_TIMEOUT) {
+            // 强制退出：清除密码并要求重新登录
+            accessPassword = '';
+            localStorage.removeItem('accessPassword');
+            // 如果有未提交订单，清除
+            if (hasUnsavedOrder()) {
+                document.getElementById('orderForm').reset();
+            }
+            showAuthOverlay('长时间未操作，请重新登录');
+        }
+    }, 30000); // 每30秒检查一次
 }
