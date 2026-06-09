@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>销售订单排队系统</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=8">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=9">
 </head>
 <body>
     <div id="authOverlay" class="auth-overlay" style="display:none;">
@@ -32,6 +32,7 @@
         <nav class="nav-tabs">
             <button class="tab-btn active" onclick="showTab('create')">创建订单</button>
             <button class="tab-btn" onclick="showTab('list')">订单明细</button>
+            <button class="tab-btn" onclick="showTab('feedback')">问题反馈</button>
         </nav>
 
         <div id="createTab" class="tab-content active">
@@ -94,6 +95,25 @@
                 <div class="loading">加载中...</div>
             </div>
         </div>
+
+        <div id="feedbackTab" class="tab-content">
+            <div class="feedback-card">
+                <div class="feedback-icon">📞</div>
+                <h2>遇到问题？</h2>
+                <p class="feedback-desc">如果您在使用系统过程中遇到任何问题，请联系技术支持</p>
+                <div class="feedback-info">
+                    <div class="feedback-item">
+                        <span class="feedback-label">联系人</span>
+                        <span class="feedback-value">李刚</span>
+                    </div>
+                    <div class="feedback-item">
+                        <span class="feedback-label">电话</span>
+                        <a href="tel:18553303897" class="feedback-value feedback-phone">18553303897</a>
+                    </div>
+                </div>
+                <p class="feedback-tip">工作时间：周一至周五 8:30-17:30</p>
+            </div>
+        </div>
     </div>
 
     <div id="editModal" class="modal">
@@ -147,6 +167,6 @@
 
     <div id="toast" class="toast"></div>
 
-    <script src="{{ url_for('static', filename='js/app.js') }}?v=8"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}?v=9"></script>
 </body>
 </html>

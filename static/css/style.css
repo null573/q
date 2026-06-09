@@ -479,6 +479,116 @@ body {
     margin-bottom: 16px;
 }
 
+/* 问题反馈页面 */
+.feedback-card {
+    max-width: 400px;
+    margin: 40px auto;
+    background: white;
+    border-radius: 16px;
+    padding: 40px 24px;
+    text-align: center;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+}
+
+.feedback-icon {
+    font-size: 56px;
+    margin-bottom: 16px;
+}
+
+.feedback-card h2 {
+    font-size: 22px;
+    color: #333;
+    margin-bottom: 8px;
+}
+
+.feedback-desc {
+    color: #666;
+    font-size: 14px;
+    margin-bottom: 24px;
+}
+
+.feedback-info {
+    background: #f8f9fa;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 16px;
+}
+
+.feedback-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid #eee;
+}
+
+.feedback-item:last-child {
+    border-bottom: none;
+}
+
+.feedback-label {
+    color: #888;
+    font-size: 14px;
+}
+
+.feedback-value {
+    color: #333;
+    font-size: 16px;
+    font-weight: 500;
+}
+
+.feedback-phone {
+    color: #667eea;
+    text-decoration: none;
+}
+
+.feedback-tip {
+    color: #999;
+    font-size: 12px;
+}
+
+/* APP响应式修复 */
+@media (max-width: 480px) {
+    .nav-tabs {
+        top: 52px;
+    }
+    
+    .tab-btn {
+        font-size: 13px;
+        padding: 10px 4px;
+    }
+    
+    .form-row {
+        flex-direction: column;
+        gap: 0;
+    }
+    
+    .filter-bar {
+        flex-wrap: wrap;
+    }
+    
+    .filter-bar input,
+    .filter-bar select {
+        min-width: 45%;
+        font-size: 13px;
+    }
+    
+    .order-table {
+        font-size: 11px;
+    }
+    
+    .order-table th,
+    .order-table td {
+        padding: 8px 4px;
+    }
+    
+    .btn-edit,
+    .btn-delete {
+        padding: 4px 8px;
+        font-size: 11px;
+    }
+}
+
 @media (min-width: 768px) {
     .container {
         max-width: 768px;

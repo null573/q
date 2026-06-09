@@ -287,6 +287,30 @@ async function calculateDate() {
 async function handleCreateOrder(e) {
     e.preventDefault();
     
+    // 如果有预计算行，先重新计算以确保数据最新（解决并发问题）
+    if (pendingRowIndex > 0) {
+        try {
+            const calcResponse = await apiFetch(`${API_BASE}/api/calculate-date`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model: document.getElementById('model').value,
+                    tonnage: document.getElementById('tonnage').value,
+                    customer: document.getElementById('customer').value,
+                    expected_date: document.getElementById('expectedDate').value,
+                    pending_row_index: pendingRowIndex,
+                    submitter_id: currentUser.id
+                })
+            });
+            const calcData = await calcResponse.json();
+            if (calcData.success) {
+                document.getElementById('calculatedDate').value = calcData.calculated_date || '';
+            }
+        } catch (err) {
+            console.log('重新计算失败:', err);
+        }
+    }
+    
     const calculatedDate = document.getElementById('calculatedDate').value;
     const queueDateInput = document.getElementById('queueDate');
     
