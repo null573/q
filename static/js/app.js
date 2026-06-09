@@ -86,14 +86,16 @@ function initApp() {
     loadModels();
     setupEventListeners();
     setupEditQueueDateListener();
+    // 刷新页面时清除上次未提交的表单数据
+    document.getElementById('orderForm').reset();
+    document.getElementById('calculatedDate').value = '';
+    pendingRowIndex = 0;
     // 期望发货日期默认为次日
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowStr = tomorrow.toISOString().split('T')[0];
     document.getElementById('expectedDate').value = tomorrowStr;
     document.getElementById('queueDate').value = tomorrowStr;
-    // 恢复草稿（如果有）
-    restoreDraft();
     // 启动无操作检测
     startIdleTimer();
 }
