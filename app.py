@@ -387,25 +387,31 @@ def calculate_date():
             for offset in range(0, 200, batch_size):
                 start = offset + 1
                 end = offset + batch_size
-                # 同时读取A列和I列
-                ai_data = read_sheet_range(SHEET_ID, f"A{start}:A{end},I{start}:I{end}")
-                ai_rows = ai_data.get("rows", [])
-                for row in ai_rows:
-                    values = row.get("values", [])
+                # 分别读取A列和I列，用行索引对应
+                a_data = read_sheet_range(SHEET_ID, f"A{start}:A{end}")
+                i_data = read_sheet_range(SHEET_ID, f"I{start}:I{end}")
+                a_rows = a_data.get("rows", [])
+                i_rows = i_data.get("rows", [])
+                for idx in range(len(a_rows)):
+                    a_row = a_rows[idx]
+                    i_row = i_rows[idx] if idx < len(i_rows) else None
                     # A列有数据才计算序号
                     a_val = ""
                     i_val = ""
-                    if len(values) > 0:
-                        a_cv = values[0].get("cellValue")
+                    for v in a_row.get("values", []):
+                        a_cv = v.get("cellValue")
                         if a_cv:
                             a_val = parse_cell_value(a_cv)
-                    if len(values) > 8:
-                        i_cv = values[8].get("cellValue")
-                        if i_cv:
-                            i_val = parse_cell_value(i_cv)
+                            break
+                    if i_row:
+                        for v in i_row.get("values", []):
+                            i_cv = v.get("cellValue")
+                            if i_cv:
+                                i_val = parse_cell_value(i_cv)
+                                break
                     if a_val.strip() and i_val and str(i_val).isdigit():
                         max_serial = max(max_serial, int(i_val))
-                if len(ai_rows) < batch_size:
+                if len(a_rows) < batch_size:
                     break
             serial_no = str(max_serial + 1)
             resp = write_order_row(
@@ -506,25 +512,31 @@ def create_order():
             for offset in range(0, 200, batch_size):
                 start = offset + 1
                 end = offset + batch_size
-                # 同时读取A列和I列
-                ai_data = read_sheet_range(SHEET_ID, f"A{start}:A{end},I{start}:I{end}")
-                ai_rows = ai_data.get("rows", [])
-                for row in ai_rows:
-                    values = row.get("values", [])
+                # 分别读取A列和I列，用行索引对应
+                a_data = read_sheet_range(SHEET_ID, f"A{start}:A{end}")
+                i_data = read_sheet_range(SHEET_ID, f"I{start}:I{end}")
+                a_rows = a_data.get("rows", [])
+                i_rows = i_data.get("rows", [])
+                for idx in range(len(a_rows)):
+                    a_row = a_rows[idx]
+                    i_row = i_rows[idx] if idx < len(i_rows) else None
                     # A列有数据才计算序号
                     a_val = ""
                     i_val = ""
-                    if len(values) > 0:
-                        a_cv = values[0].get("cellValue")
+                    for v in a_row.get("values", []):
+                        a_cv = v.get("cellValue")
                         if a_cv:
                             a_val = parse_cell_value(a_cv)
-                    if len(values) > 8:
-                        i_cv = values[8].get("cellValue")
-                        if i_cv:
-                            i_val = parse_cell_value(i_cv)
+                            break
+                    if i_row:
+                        for v in i_row.get("values", []):
+                            i_cv = v.get("cellValue")
+                            if i_cv:
+                                i_val = parse_cell_value(i_cv)
+                                break
                     if a_val.strip() and i_val and str(i_val).isdigit():
                         max_serial = max(max_serial, int(i_val))
-                if len(ai_rows) < batch_size:
+                if len(a_rows) < batch_size:
                     break
             if max_serial > 0:
                 serial_no = str(max_serial + 1)
