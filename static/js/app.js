@@ -118,11 +118,11 @@ function doAuth() {
     .then(r => r.json())
     .then(data => {
         if (data.success) {
-            accessPassword = password;
+            accessPassword = data.access_password || '';
             employeeId = selectedEmployeeId;
-            localStorage.setItem('accessPassword', password);
+            localStorage.setItem('accessPassword', accessPassword);
             localStorage.setItem('employeeId', selectedEmployeeId);
-            currentUser.name = data.name || '用户';
+            currentUser.name = data.user?.name || '用户';
             currentUser.id = selectedEmployeeId;
             hideAuthOverlay();
             initApp();

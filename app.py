@@ -69,7 +69,8 @@ def auth_login():
                     "user": {
                         "name": user["name"],
                         "employee_id": user["employee_id"]
-                    }
+                    },
+                    "access_password": ACCESS_PASSWORD
                 })
             else:
                 return jsonify({"success": False, "error": "密码错误"})
