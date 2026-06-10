@@ -216,48 +216,36 @@ function setupEventListeners() {
         }
     });
     // 日期选择器：点击日期后自动关闭
-    // 方案：监听focus事件，当选择器打开后，在document上监听一次click/touch，
-    // 如果点击的是日历中的日期（通过检测值变化判断），则关闭选择器
+    // 手机Chrome的日期选择器是系统级组件，事件无法穿透
+    // 方案：用MutationObserver检测value属性变化 + 定时轮询
     ['expectedDate', 'queueDate', 'editExpectedDate', 'editQueueDate'].forEach(fieldId => {
         const field = document.getElementById(fieldId);
         if (!field) return;
         
-        field.addEventListener('focus', function onFocus() {
-            const startVal = field.value;
-            let closed = false;
-            
-            function closePicker() {
-                if (closed) return;
-                closed = true;
-                field.blur();
-                document.removeEventListener('click', tryClose, true);
-                document.removeEventListener('touchend', tryClose, true);
-            }
-            
-            function tryClose(e) {
-                // 如果值变了，说明选了日期，关闭选择器
-                if (field.value !== startVal) {
-                    closePicker();
-                    return;
+        // 方案1：MutationObserver检测value属性变化
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+                if (mutation.type === 'attributes' && mutation.attributeName === 'value') {
+                    field.blur();
                 }
-                // 如果点击的是"设置/完成"按钮区域（通常在底部），也关闭
-                // 通过延迟检测值是否变化来判断
-                setTimeout(() => {
-                    if (field.value !== startVal) {
-                        closePicker();
-                    }
-                }, 100);
+            });
+        });
+        observer.observe(field, { attributes: true });
+        
+        // 方案2：定时轮询（针对手机Chrome）
+        let lastVal = field.value;
+        const checkInterval = setInterval(() => {
+            const currentVal = field.value;
+            if (currentVal !== lastVal) {
+                lastVal = currentVal;
+                field.blur();
             }
-            
-            // 使用capture阶段监听，确保在事件冒泡前捕获
-            document.addEventListener('click', tryClose, true);
-            document.addEventListener('touchend', tryClose, true);
-            
-            // 安全清理：5秒后自动移除监听器
-            setTimeout(() => {
-                document.removeEventListener('click', tryClose, true);
-                document.removeEventListener('touchend', tryClose, true);
-            }, 5000);
+        }, 200);
+        
+        // 页面卸载时清理
+        window.addEventListener('beforeunload', () => {
+            observer.disconnect();
+            clearInterval(checkInterval);
         });
     });
     // 监听用户操作，记录活动时间
