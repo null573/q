@@ -215,39 +215,7 @@ function setupEventListeners() {
             field.addEventListener('change', saveDraft);
         }
     });
-    // 日期选择器：点击日期后自动关闭
-    // 手机Chrome的日期选择器是系统级组件，事件无法穿透
-    // 方案：用MutationObserver检测value属性变化 + 定时轮询
-    ['expectedDate', 'queueDate', 'editExpectedDate', 'editQueueDate'].forEach(fieldId => {
-        const field = document.getElementById(fieldId);
-        if (!field) return;
-        
-        // 方案1：MutationObserver检测value属性变化
-        const observer = new MutationObserver((mutations) => {
-            mutations.forEach((mutation) => {
-                if (mutation.type === 'attributes' && mutation.attributeName === 'value') {
-                    field.blur();
-                }
-            });
-        });
-        observer.observe(field, { attributes: true });
-        
-        // 方案2：定时轮询（针对手机Chrome）
-        let lastVal = field.value;
-        const checkInterval = setInterval(() => {
-            const currentVal = field.value;
-            if (currentVal !== lastVal) {
-                lastVal = currentVal;
-                field.blur();
-            }
-        }, 200);
-        
-        // 页面卸载时清理
-        window.addEventListener('beforeunload', () => {
-            observer.disconnect();
-            clearInterval(checkInterval);
-        });
-    });
+    // 日期选择器已改用自定义组件（showDatePicker函数），无需自动关闭逻辑
     // 监听用户操作，记录活动时间
     ['click', 'keydown', 'scroll', 'touchstart'].forEach(evt => {
         document.addEventListener(evt, recordActivity, { passive: true });
@@ -652,6 +620,135 @@ async function handleChangePassword(e) {
     } catch (error) {
         showToast('网络错误', 'error');
     }
+}
+
+// 自定义日期选择器（解决手机Chrome原生日期选择器无法自动关闭问题）
+function showDatePicker(input) {
+    // 获取今天的日期
+    const today = new Date();
+    const currentYear = today.getFullYear();
+    const currentMonth = today.getMonth();
+    
+    // 解析当前值
+    let selectedDate = input.value ? new Date(input.value) : null;
+    if (selectedDate && isNaN(selectedDate.getTime())) selectedDate = null;
+    
+    let displayYear = selectedDate ? selectedDate.getFullYear() : currentYear;
+    let displayMonth = selectedDate ? selectedDate.getMonth() : currentMonth;
+    
+    // 创建遮罩层
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:3000;display:flex;justify-content:center;align-items:center;';
+    
+    // 创建日历容器
+    const picker = document.createElement('div');
+    picker.style.cssText = 'background:#fff;border-radius:12px;padding:16px;width:280px;box-shadow:0 4px 20px rgba(0,0,0,0.3);';
+    
+    // 渲染日历函数
+    function renderCalendar() {
+        const monthNames = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+        const firstDay = new Date(displayYear, displayMonth, 1).getDay();
+        const daysInMonth = new Date(displayYear, displayMonth + 1, 0).getDate();
+        
+        let html = `
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                <button onclick="prevMonth()" style="background:none;border:none;font-size:18px;cursor:pointer;padding:4px 8px;">‹</button>
+                <span style="font-weight:600;font-size:16px;">${displayYear}年${monthNames[displayMonth]}</span>
+                <button onclick="nextMonth()" style="background:none;border:none;font-size:18px;cursor:pointer;padding:4px 8px;">›</button>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;margin-bottom:8px;">
+                <div style="color:#999;font-size:12px;padding:4px;">日</div>
+                <div style="color:#999;font-size:12px;padding:4px;">一</div>
+                <div style="color:#999;font-size:12px;padding:4px;">二</div>
+                <div style="color:#999;font-size:12px;padding:4px;">三</div>
+                <div style="color:#999;font-size:12px;padding:4px;">四</div>
+                <div style="color:#999;font-size:12px;padding:4px;">五</div>
+                <div style="color:#999;font-size:12px;padding:4px;">六</div>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;">
+        `;
+        
+        // 空白格
+        for (let i = 0; i < firstDay; i++) {
+            html += '<div></div>';
+        }
+        
+        // 日期
+        for (let day = 1; day <= daysInMonth; day++) {
+            const dateStr = `${displayYear}-${String(displayMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            const isSelected = selectedDate && selectedDate.getDate() === day && selectedDate.getMonth() === displayMonth && selectedDate.getFullYear() === displayYear;
+            const isToday = today.getDate() === day && today.getMonth() === displayMonth && today.getFullYear() === displayYear;
+            
+            let bg = isSelected ? '#667eea' : (isToday ? '#e8f0fe' : 'transparent');
+            let color = isSelected ? '#fff' : (isToday ? '#667eea' : '#333');
+            
+            html += `<button onclick="selectDate('${dateStr}')" style="background:${bg};color:${color};border:none;border-radius:50%;width:32px;height:32px;font-size:14px;cursor:pointer;padding:0;">${day}</button>`;
+        }
+        
+        html += '</div>';
+        html += `
+            <div style="display:flex;justify-content:space-between;margin-top:16px;padding-top:12px;border-top:1px solid #eee;">
+                <button onclick="clearDate()" style="background:none;border:none;color:#999;font-size:14px;cursor:pointer;">清除</button>
+                <button onclick="cancelPicker()" style="background:none;border:none;color:#667eea;font-size:14px;cursor:pointer;">取消</button>
+            </div>
+        `;
+        
+        picker.innerHTML = html;
+    }
+    
+    // 全局函数供HTML调用
+    window.prevMonth = function() {
+        displayMonth--;
+        if (displayMonth < 0) {
+            displayMonth = 11;
+            displayYear--;
+        }
+        renderCalendar();
+    };
+    
+    window.nextMonth = function() {
+        displayMonth++;
+        if (displayMonth > 11) {
+            displayMonth = 0;
+            displayYear++;
+        }
+        renderCalendar();
+    };
+    
+    window.selectDate = function(dateStr) {
+        input.value = dateStr;
+        // 触发change事件
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        closePicker();
+    };
+    
+    window.clearDate = function() {
+        input.value = '';
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        closePicker();
+    };
+    
+    window.cancelPicker = function() {
+        closePicker();
+    };
+    
+    function closePicker() {
+        document.body.removeChild(overlay);
+        delete window.prevMonth;
+        delete window.nextMonth;
+        delete window.selectDate;
+        delete window.clearDate;
+        delete window.cancelPicker;
+    }
+    
+    // 点击遮罩关闭
+    overlay.addEventListener('click', function(e) {
+        if (e.target === overlay) closePicker();
+    });
+    
+    renderCalendar();
+    overlay.appendChild(picker);
+    document.body.appendChild(overlay);
 }
 
 function doLogout() {
