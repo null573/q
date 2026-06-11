@@ -419,6 +419,94 @@ def create_order():
         return jsonify({"success": False, "error": str(e)})
 
 
+# 全局缓存：原始订单数据（不过滤权限和日期）
+_orders_cache = {"data": None, "timestamp": 0}
+CACHE_TTL = 30  # 缓存30秒
+
+def fetch_all_orders_raw():
+    """从腾讯表格读取所有订单原始数据，带缓存"""
+    now = datetime.now().timestamp()
+    if _orders_cache["data"] is not None and (now - _orders_cache["timestamp"]) < CACHE_TTL:
+        return _orders_cache["data"]
+
+    # Step 1: 快速扫描A列，找到数据边界（每批200行）
+    last_data_row = 1
+    batch_size = 200
+    for offset in range(0, 2000, batch_size):
+        start = offset + 1
+        end = offset + batch_size
+        range_str = f"A{start}:A{end}"
+        grid_data = read_sheet_range(SHEET_ID, range_str)
+        rows = grid_data.get("rows", [])
+        if not rows:
+            break
+        for i, row in enumerate(rows):
+            actual_row = start + i
+            values = row.get("values", [])
+            if values:
+                cv = values[0].get("cellValue")
+                if cv:
+                    text = parse_cell_value(cv)
+                    if text.strip():
+                        last_data_row = actual_row
+        if len(rows) < batch_size:
+            break
+
+    if last_data_row <= 1:
+        _orders_cache["data"] = []
+        _orders_cache["timestamp"] = now
+        return []
+
+    # Step 2: 只读取有数据的范围（A2:Llast_data_row）
+    all_rows = []
+    batch_size = 100
+    for offset in range(1, last_data_row, batch_size):
+        start = offset + 1  # 从第2行开始（跳过表头）
+        end = min(offset + batch_size, last_data_row)
+        range_str = f"A{start}:L{end}"
+        grid_data = read_sheet_range(SHEET_ID, range_str)
+        rows = grid_data.get("rows", [])
+        all_rows.extend(rows)
+
+    # Step 3: 解析数据
+    orders = []
+    for i, row in enumerate(all_rows):
+        values = row.get("values", [])
+        if not values:
+            continue
+
+        def get_col(idx):
+            if idx < len(values):
+                cv = values[idx].get("cellValue")
+                if cv:
+                    return parse_cell_value(cv)
+            return ""
+
+        row_data = [get_col(j) for j in range(12)]
+        if not row_data[0]:
+            continue
+
+        orders.append({
+            "row_index": i + 2,  # 1-based（从第2行开始）
+            "model": row_data[0],
+            "tonnage": row_data[1],
+            "customer": row_data[2],
+            "expected_date": row_data[3],
+            "calculated_date": row_data[4],
+            "queue_date": row_data[5],
+            "submitter": row_data[6],
+            "remark": row_data[7],
+            "serial_no": row_data[8],
+            "last_entry": row_data[9],
+            "submitter_id": row_data[10],
+            "submit_time": row_data[11]
+        })
+
+    _orders_cache["data"] = orders
+    _orders_cache["timestamp"] = now
+    return orders
+
+
 @app.route('/api/orders', methods=['GET'])
 @require_auth
 def get_orders():
@@ -426,11 +514,7 @@ def get_orders():
     try:
         submitter_id = request.args.get('submitter_id', '')
         is_admin = is_user_admin(submitter_id)
-        
-        # 管理员筛选参数：mine=只看自己的，all=看全部
         view_mode = request.args.get('view_mode', 'mine' if not is_admin else 'all')
-        
-        # 分页参数
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
         if page < 1:
@@ -440,85 +524,36 @@ def get_orders():
         if per_page > 100:
             per_page = 100
 
-        # 分批读取表格数据，每批100行，优化读取速度
-        all_rows = []
-        batch_size = 100
-        for offset in range(0, 2000, batch_size):
-            start = offset + 1
-            end = offset + batch_size
-            range_str = f"A{start}:L{end}"
-            grid_data = read_sheet_range(SHEET_ID, range_str)
-            rows = grid_data.get("rows", [])
-            all_rows.extend(rows)
-            # 如果返回行数少于batch_size，说明已到末尾
-            if len(rows) < batch_size:
-                break
-
-        orders = []
+        # 读取原始数据（带缓存）
+        all_orders = fetch_all_orders_raw()
         today = datetime.now().date()
 
-        for i, row in enumerate(all_rows):
-            if i == 0:
-                continue  # 跳过表头
+        # 过滤
+        orders = []
+        for order in all_orders:
+            row_submitter_id = order["submitter_id"]
 
-            values = row.get("values", [])
-            if not values:
-                continue
-
-            # 解析各列（按索引取值，空列可能不存在）
-            def get_col(idx):
-                if idx < len(values):
-                    cv = values[idx].get("cellValue")
-                    if cv:
-                        return parse_cell_value(cv)
-                return ""
-
-            row_data = [get_col(j) for j in range(12)]
-
-            # 至少A列有数据才显示
-            if not row_data[0]:
-                continue
-
-            # 检查权限
-            row_submitter_id = row_data[10]
+            # 权限过滤
             if not is_admin:
-                # 非管理员只能看自己的（submitter_id为空的也显示）
                 if submitter_id and row_submitter_id and row_submitter_id != submitter_id:
                     continue
             else:
-                # 管理员根据view_mode筛选
                 if view_mode == 'mine':
-                    # 只看submitter_id匹配的订单，空的也跳过
                     if not row_submitter_id or row_submitter_id != submitter_id:
                         continue
 
-            # 检查期望发货日期是否大于等于今天（>=今天）
-            expected_date_str = row_data[3]
+            # 期望发货日期过滤
+            expected_date_str = order["expected_date"]
             if expected_date_str:
                 try:
                     expected_date = datetime.strptime(expected_date_str, "%Y-%m-%d").date()
                     if expected_date < today:
                         continue
                 except:
-                    pass  # 非日期格式不过滤
+                    pass
 
-            order = {
-                "row_index": i + 1,  # 1-based
-                "model": row_data[0],
-                "tonnage": row_data[1],
-                "customer": row_data[2],
-                "expected_date": row_data[3],
-                "calculated_date": row_data[4],
-                "queue_date": row_data[5],
-                "submitter": row_data[6],
-                "remark": row_data[7],
-                "serial_no": row_data[8],
-                "last_entry": row_data[9],
-                "submitter_id": row_submitter_id,
-                "submit_time": row_data[11]
-            }
             orders.append(order)
-        
+
         # 默认按排队日期升序排列（空日期排最后）
         def sort_key(o):
             qd = o.get("queue_date", "")
@@ -526,7 +561,7 @@ def get_orders():
                 return (0, qd)
             return (1, "")
         orders.sort(key=sort_key)
-        
+
         # 分页
         total = len(orders)
         start_idx = (page - 1) * per_page
@@ -534,7 +569,7 @@ def get_orders():
         paginated_orders = orders[start_idx:end_idx]
 
         return jsonify({
-            "success": True, 
+            "success": True,
             "orders": paginated_orders,
             "is_admin": is_admin,
             "view_mode": view_mode,
