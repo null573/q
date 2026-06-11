@@ -302,13 +302,25 @@ def get_models():
         return jsonify({"success": False, "error": str(e)})
 
 
-def async_write_to_sheet(model, tonnage, customer, expected_date, calculated_date, pending_row_index):
-    """后台异步写入数据到腾讯表格"""
+@app.route('/api/calculate-date', methods=['POST'])
+@require_auth
+def calculate_date():
+    """计算可发货日期：同步写入，确保返回正确的row_index避免重复记录"""
     try:
-        # 优先复用前端传来的行号
+        data = request.json
+        model = data.get('model', '')
+        tonnage = data.get('tonnage', '')
+        customer = data.get('customer', '')
+        expected_date = data.get('expected_date', '')
+        pending_row_index = data.get('pending_row_index', 0)
+
+        # 1. 使用本地计算引擎计算可发货日期
+        calculated_date, error_msg = calculate_delivery_date(model, tonnage, expected_date)
+
+        # 2. 优先复用前端传来的行号
         existing_row = pending_row_index if pending_row_index > 0 else 0
 
-        # 如果前端没有传来行号，再按型号查找未提交的待处理行
+        # 3. 如果前端没有传来行号，再按型号查找未提交的待处理行
         if existing_row == 0:
             batch_size = 50
             for offset in range(0, 200, batch_size):
@@ -356,82 +368,30 @@ def async_write_to_sheet(model, tonnage, customer, expected_date, calculated_dat
                     }
                 }]
             }
-            batch_update(body)
+            resp = batch_update(body)
+            target_row = existing_row
         else:
             # 新建行
             empty_row = get_next_empty_row(SHEET_ID)
             write_row_idx = empty_row - 1
             remark = f"{tonnage}{customer}"
-            # 扫描A列和I列，只取A列有数据的行对应的I列序号，找到最大序号+1
-            max_serial = 0
-            batch_size = 50
-            for offset in range(0, 200, batch_size):
-                start = offset + 1
-                end = offset + batch_size
-                a_data = read_sheet_range(SHEET_ID, f"A{start}:A{end}")
-                i_data = read_sheet_range(SHEET_ID, f"I{start}:I{end}")
-                a_rows = a_data.get("rows", [])
-                i_rows = i_data.get("rows", [])
-                for idx in range(len(a_rows)):
-                    a_row = a_rows[idx]
-                    i_row = i_rows[idx] if idx < len(i_rows) else None
-                    a_val = ""
-                    i_val = ""
-                    for v in a_row.get("values", []):
-                        a_cv = v.get("cellValue")
-                        if a_cv:
-                            a_val = parse_cell_value(a_cv)
-                            break
-                    if i_row:
-                        for v in i_row.get("values", []):
-                            i_cv = v.get("cellValue")
-                            if i_cv:
-                                i_val = parse_cell_value(i_cv)
-                                break
-                    if a_val.strip() and i_val and str(i_val).isdigit():
-                        max_serial = max(max_serial, int(i_val))
-                if len(a_rows) < batch_size:
-                    break
-            serial_no = str(max_serial + 1)
-            write_order_row(
+            # 序号直接用行号
+            serial_no = str(empty_row)
+            resp = write_order_row(
                 write_row_idx, model, tonnage, customer, expected_date,
                 calculated_date, "", "", remark, serial_no, "", ""
             )
-    except Exception as e:
-        print(f"[Async Write Error] {e}")
+            target_row = empty_row
 
+        result = resp.json()
 
-@app.route('/api/calculate-date', methods=['POST'])
-@require_auth
-def calculate_date():
-    """计算可发货日期：优化版本，先返回结果，后台异步写入"""
-    try:
-        data = request.json
-        model = data.get('model', '')
-        tonnage = data.get('tonnage', '')
-        customer = data.get('customer', '')
-        expected_date = data.get('expected_date', '')
-        pending_row_index = data.get('pending_row_index', 0)
-
-        # 1. 使用本地计算引擎计算可发货日期（核心操作，约800ms）
-        calculated_date, error_msg = calculate_delivery_date(model, tonnage, expected_date)
-
-        # 2. 立即返回结果给用户，不等待写入操作
-        # 前端只需要calculated_date，row_index用于后续提交时复用
-        # 这里返回pending_row_index或0，让前端在真正提交时再处理行号
-
-        # 3. 后台异步写入数据（不阻塞响应）
-        thread = threading.Thread(
-            target=async_write_to_sheet,
-            args=(model, tonnage, customer, expected_date, calculated_date, pending_row_index)
-        )
-        thread.daemon = True
-        thread.start()
+        if "responses" not in result:
+            return jsonify({"success": False, "error": f"写入数据失败: {json.dumps(result, ensure_ascii=False)}"})
 
         return jsonify({
             "success": True,
             "calculated_date": calculated_date,
-            "row_index": pending_row_index  # 返回前端传来的行号，如果是0表示需要新建
+            "row_index": target_row
         })
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
