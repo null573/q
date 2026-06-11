@@ -781,18 +781,17 @@ function showDatePicker(input) {
 }
 
 function doLogout() {
-    console.log('[doLogout] before: employeeId=', employeeId, 'currentUser.id=', currentUser.id);
     accessPassword = '';
     employeeId = '';
     localStorage.removeItem('accessPassword');
     localStorage.removeItem('employeeId');
     localStorage.removeItem('userName');
     currentUser = { name: '用户', id: '' };
-    console.log('[doLogout] after: employeeId=', employeeId, 'currentUser.id=', currentUser.id);
     document.getElementById('changePwdBtn').style.display = 'none';
     document.getElementById('logoutBtn').style.display = 'none';
     document.getElementById('userName').textContent = '未登录';
-    showAuthOverlay();
+    // 强制刷新页面，确保所有状态被清除，避免切换用户时ID混乱
+    window.location.reload();
 }
 
 async function calculateDateForEdit() {
