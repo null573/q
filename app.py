@@ -12,12 +12,12 @@ app = Flask(__name__)
 app.secret_key = os.urandom(24)
 CORS(app)
 
-# 腾讯表格配置
-FILE_ID = "DRkR6aXhGcWxLYVFR"
+# 腾讯表格配置（正式排队表格）
+FILE_ID = "DRnhDemRIS25mdnFF"
 SHEET_ID = "000007"       # 自助排队表格
 MODEL_SHEET_ID = "000008"  # 牌号表格
 
-# 用户表配置
+# 用户表配置（和正式表格同一个文件）
 USER_FILE_ID = "DRnhDemRIS25mdnFF"
 USER_SHEET_ID = "s9osf8"
 
