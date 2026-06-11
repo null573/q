@@ -185,7 +185,7 @@ def get_next_empty_row(sheet_id):
     """获取表格下一个空行号（1-based），从第3行开始扫描（跳过表头第1-2行）"""
     # 分批读取，每批50行
     batch_size = 50
-    for offset in range(0, 200, batch_size):
+    for offset in range(0, 1000, batch_size):
         start = offset + 1  # 1-based
         end = offset + batch_size
         range_str = f"A{start}:A{end}"
@@ -440,7 +440,7 @@ def get_orders():
         # 分批读取表格数据，每批50行，避免RangeSize过大导致400001错误
         all_rows = []
         batch_size = 50
-        for offset in range(0, 200, batch_size):
+        for offset in range(0, 1000, batch_size):
             start = offset + 1
             end = offset + batch_size
             range_str = f"A{start}:L{end}"
