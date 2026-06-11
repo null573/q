@@ -153,7 +153,7 @@ function doAuth() {
 // 未提交排队的临时数据（页面关闭/刷新时清除）
 let draftQueue = null;
 let lastActivityTime = Date.now();
-const IDLE_TIMEOUT = 10 * 60 * 1000; // 10分钟无操作强制退出
+const IDLE_TIMEOUT = 2 * 60 * 60 * 1000; // 2小时无操作强制退出
 
 function initApp() {
     document.getElementById('userName').textContent = currentUser.name;
@@ -863,20 +863,6 @@ function doLogout() {
     // 强制刷新页面，确保所有状态被清除，避免切换用户时ID混乱
     window.location.reload();
 }
-
-// 2小时无操作自动退出（放在doLogout定义之后）
-let _idleTimer = null;
-const IDLE_TIMEOUT = 2 * 60 * 60 * 1000; // 2小时
-function resetIdleTimer() {
-    if (_idleTimer) clearTimeout(_idleTimer);
-    _idleTimer = setTimeout(() => {
-        doLogout();
-    }, IDLE_TIMEOUT);
-}
-['click', 'keydown', 'scroll', 'touchstart'].forEach(evt => {
-    document.addEventListener(evt, resetIdleTimer, { passive: true });
-});
-resetIdleTimer();
 
 async function calculateDateForEdit() {
     const model = document.getElementById('editModel').value;
