@@ -5,6 +5,7 @@ import json
 import os
 from datetime import datetime
 import functools
+from calc_engine import calculate_delivery_date
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
@@ -212,9 +213,9 @@ def is_date_string(value):
     return bool(re.match(r'^\d{4}-\d{2}-\d{2}$', str(value).strip()))
 
 
-def write_order_row(row_index_0based, model, tonnage, customer, expected_date, queue_date, submitter, remark, serial_no, submitter_id, submit_time):
+def write_order_row(row_index_0based, model, tonnage, customer, expected_date, calculated_date, queue_date, submitter, remark, serial_no, submitter_id, submit_time):
     """写入一行订单数据到腾讯表格（row_index_0based从0开始）
-    注意：E列（可发货日期）有公式保护，完全不写入，避免覆盖公式结果
+    E列（可发货日期）现在由本地计算引擎计算后写入，不再依赖腾讯表格公式
     """
     # A-D列 (0-3)
     values_left = [
@@ -223,8 +224,16 @@ def write_order_row(row_index_0based, model, tonnage, customer, expected_date, q
         build_cell_value(customer),                      # C: 客户
         build_cell_value(expected_date, is_date=True),  # D: 期望发货日期
     ]
-    # F-L列 (5-11) - 跳过E列
-    # F列智能判断：如果是日期格式用日期写入，否则用文本写入
+    # E列 (4) - 可发货日期（由本地计算引擎计算）
+    values_e = []
+    if calculated_date and is_date_string(calculated_date):
+        values_e = [build_cell_value(calculated_date, is_date=True)]
+    elif calculated_date:
+        values_e = [build_cell_value(calculated_date)]
+    else:
+        values_e = [build_cell_value("")]
+    
+    # F-L列 (5-11)
     queue_date_is_date = is_date_string(queue_date)
     values_right = [
         build_cell_value(queue_date, is_date=queue_date_is_date),  # F: 输入发货日期排队
@@ -236,31 +245,44 @@ def write_order_row(row_index_0based, model, tonnage, customer, expected_date, q
         build_cell_value(submit_time),     # L: 提交时间
     ]
 
-    # 分两次写入：先写A-D，再写F-L
-    body = {
-        "requests": [
-            {
-                "updateRangeRequest": {
-                    "sheetId": SHEET_ID,
-                    "gridData": {
-                        "startRow": row_index_0based,
-                        "startColumn": 0,
-                        "rows": [{"values": values_left}]
-                    }
-                }
-            },
-            {
-                "updateRangeRequest": {
-                    "sheetId": SHEET_ID,
-                    "gridData": {
-                        "startRow": row_index_0based,
-                        "startColumn": 5,
-                        "rows": [{"values": values_right}]
-                    }
+    # 分三次写入：先写A-D，再写E，再写F-L
+    requests_list = [
+        {
+            "updateRangeRequest": {
+                "sheetId": SHEET_ID,
+                "gridData": {
+                    "startRow": row_index_0based,
+                    "startColumn": 0,
+                    "rows": [{"values": values_left}]
                 }
             }
-        ]
-    }
+        }
+    ]
+    
+    # 写入E列（可发货日期）
+    requests_list.append({
+        "updateRangeRequest": {
+            "sheetId": SHEET_ID,
+            "gridData": {
+                "startRow": row_index_0based,
+                "startColumn": 4,
+                "rows": [{"values": values_e}]
+            }
+        }
+    })
+    
+    requests_list.append({
+        "updateRangeRequest": {
+            "sheetId": SHEET_ID,
+            "gridData": {
+                "startRow": row_index_0based,
+                "startColumn": 5,
+                "rows": [{"values": values_right}]
+            }
+        }
+    })
+    
+    body = {"requests": requests_list}
     return batch_update(body)
 
 
@@ -309,19 +331,22 @@ def get_models():
 @app.route('/api/calculate-date', methods=['POST'])
 @require_auth
 def calculate_date():
-    """计算可发货日期：先检查是否有匹配的待提交行，有则复用，无则写入新行"""
+    """计算可发货日期：使用本地计算引擎，不再依赖腾讯表格E列公式"""
     try:
         data = request.json
         model = data.get('model', '')
         tonnage = data.get('tonnage', '')
         customer = data.get('customer', '')
         expected_date = data.get('expected_date', '')
-        pending_row_index = data.get('pending_row_index', 0)  # 前端已有的待提交行号
+        pending_row_index = data.get('pending_row_index', 0)
 
-        # 1. 优先复用前端传来的行号（pending_row_index 是前端当前正在编辑的行）
+        # 1. 使用本地计算引擎计算可发货日期（不再写入腾讯表格后等待公式计算）
+        calculated_date, error_msg = calculate_delivery_date(model, tonnage, expected_date)
+
+        # 2. 优先复用前端传来的行号
         existing_row = pending_row_index if pending_row_index > 0 else 0
 
-        # 2. 如果前端没有传来行号，再按型号查找未提交的待处理行
+        # 3. 如果前端没有传来行号，再按型号查找未提交的待处理行
         if existing_row == 0:
             batch_size = 50
             for offset in range(0, 200, batch_size):
@@ -333,16 +358,13 @@ def calculate_date():
 
                 for i in range(len(rows)):
                     row = rows[i]
-                    actual_row = start + i  # 1-based
+                    actual_row = start + i
                     if actual_row < 3:
-                        continue  # 跳过表头
+                        continue
                     values = row.get("values", [])
                     row_data = [parse_cell_value(v.get("cellValue")) for v in values]
-
-                    # 检查A列型号匹配
                     a_val = row_data[0] if len(row_data) > 0 else ""
-                    f_val = row_data[5] if len(row_data) > 5 else ""  # F列排队日期
-
+                    f_val = row_data[5] if len(row_data) > 5 else ""
                     if a_val == model and not f_val.strip():
                         existing_row = actual_row
                         break
@@ -353,10 +375,9 @@ def calculate_date():
                     break
 
         if existing_row > 0:
-            # 复用已有行：更新A-D列数据（跳过E列）
+            # 复用已有行：更新A-D列数据
             write_row_idx = existing_row - 1
             remark = f"{tonnage}{customer}"
-            # 只更新A-D列
             body = {
                 "requests": [{
                     "updateRangeRequest": {
@@ -387,7 +408,6 @@ def calculate_date():
             for offset in range(0, 200, batch_size):
                 start = offset + 1
                 end = offset + batch_size
-                # 分别读取A列和I列，用行索引对应
                 a_data = read_sheet_range(SHEET_ID, f"A{start}:A{end}")
                 i_data = read_sheet_range(SHEET_ID, f"I{start}:I{end}")
                 a_rows = a_data.get("rows", [])
@@ -395,7 +415,6 @@ def calculate_date():
                 for idx in range(len(a_rows)):
                     a_row = a_rows[idx]
                     i_row = i_rows[idx] if idx < len(i_rows) else None
-                    # A列有数据才计算序号
                     a_val = ""
                     i_val = ""
                     for v in a_row.get("values", []):
@@ -416,7 +435,7 @@ def calculate_date():
             serial_no = str(max_serial + 1)
             resp = write_order_row(
                 write_row_idx, model, tonnage, customer, expected_date,
-                "", "", remark, serial_no, "", ""
+                calculated_date, "", "", remark, serial_no, "", ""
             )
             target_row = empty_row
 
@@ -424,43 +443,6 @@ def calculate_date():
 
         if "responses" not in result:
             return jsonify({"success": False, "error": f"写入数据失败: {json.dumps(result, ensure_ascii=False)}"})
-
-        # 读取E列计算结果（尝试多种方式）
-        import time
-        time.sleep(2)
-        
-        calculated_date = ""
-        
-        # 方式1：直接读取E列
-        e_data = read_sheet_range(SHEET_ID, f"E{target_row}:E{target_row}")
-        e_rows = e_data.get("rows", [])
-        if e_rows:
-            for v in e_rows[0].get("values", []):
-                cv = v.get("cellValue")
-                if cv:
-                    calculated_date = parse_cell_value(cv)
-        
-        # 方式2：如果直接读取为空，尝试读取整行
-        if not calculated_date:
-            full_data = read_sheet_range(SHEET_ID, f"A{target_row}:L{target_row}")
-            full_rows = full_data.get("rows", [])
-            if full_rows:
-                values = full_rows[0].get("values", [])
-                if len(values) > 4:
-                    cv = values[4].get("cellValue")
-                    if cv:
-                        calculated_date = parse_cell_value(cv)
-        
-        # 方式3：如果还是为空，再等2秒重试一次
-        if not calculated_date:
-            time.sleep(2)
-            e_data2 = read_sheet_range(SHEET_ID, f"E{target_row}:E{target_row}")
-            e_rows2 = e_data2.get("rows", [])
-            if e_rows2:
-                for v in e_rows2[0].get("values", []):
-                    cv = v.get("cellValue")
-                    if cv:
-                        calculated_date = parse_cell_value(cv)
 
         return jsonify({
             "success": True,
@@ -541,9 +523,12 @@ def create_order():
             if max_serial > 0:
                 serial_no = str(max_serial + 1)
 
+        # 计算可发货日期（用于写入E列）
+        calc_date_for_write, _ = calculate_delivery_date(model, tonnage, expected_date)
+        
         resp = write_order_row(
             write_row_idx, model, tonnage, customer, expected_date,
-            queue_date, submitter, remark, serial_no, submitter_id, submit_time
+            calc_date_for_write, queue_date, submitter, remark, serial_no, submitter_id, submit_time
         )
         result = resp.json()
 
@@ -678,9 +663,11 @@ def update_order(row_index):
 
         # 更新（row_index是1-based，转为0-based）
         write_idx = row_index - 1
+        # 计算可发货日期（用于写入E列）
+        calc_date_for_update, _ = calculate_delivery_date(model, tonnage, expected_date)
         resp = write_order_row(
             write_idx, model, tonnage, customer, expected_date,
-            queue_date, submitter, remark, str(write_idx), submitter_id,
+            calc_date_for_update, queue_date, submitter, remark, str(write_idx), submitter_id,
             datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         )
         result = resp.json()
