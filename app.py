@@ -5,6 +5,7 @@ import json
 import os
 from datetime import datetime
 import functools
+import threading
 from calc_engine import calculate_delivery_date
 
 app = Flask(__name__)
@@ -328,25 +329,13 @@ def get_models():
         return jsonify({"success": False, "error": str(e)})
 
 
-@app.route('/api/calculate-date', methods=['POST'])
-@require_auth
-def calculate_date():
-    """计算可发货日期：使用本地计算引擎，不再依赖腾讯表格E列公式"""
+def async_write_to_sheet(model, tonnage, customer, expected_date, calculated_date, pending_row_index):
+    """后台异步写入数据到腾讯表格"""
     try:
-        data = request.json
-        model = data.get('model', '')
-        tonnage = data.get('tonnage', '')
-        customer = data.get('customer', '')
-        expected_date = data.get('expected_date', '')
-        pending_row_index = data.get('pending_row_index', 0)
-
-        # 1. 使用本地计算引擎计算可发货日期（不再写入腾讯表格后等待公式计算）
-        calculated_date, error_msg = calculate_delivery_date(model, tonnage, expected_date)
-
-        # 2. 优先复用前端传来的行号
+        # 优先复用前端传来的行号
         existing_row = pending_row_index if pending_row_index > 0 else 0
 
-        # 3. 如果前端没有传来行号，再按型号查找未提交的待处理行
+        # 如果前端没有传来行号，再按型号查找未提交的待处理行
         if existing_row == 0:
             batch_size = 50
             for offset in range(0, 200, batch_size):
@@ -377,7 +366,6 @@ def calculate_date():
         if existing_row > 0:
             # 复用已有行：更新A-D列数据
             write_row_idx = existing_row - 1
-            remark = f"{tonnage}{customer}"
             body = {
                 "requests": [{
                     "updateRangeRequest": {
@@ -395,8 +383,7 @@ def calculate_date():
                     }
                 }]
             }
-            resp = batch_update(body)
-            target_row = existing_row
+            batch_update(body)
         else:
             # 新建行
             empty_row = get_next_empty_row(SHEET_ID)
@@ -433,21 +420,45 @@ def calculate_date():
                 if len(a_rows) < batch_size:
                     break
             serial_no = str(max_serial + 1)
-            resp = write_order_row(
+            write_order_row(
                 write_row_idx, model, tonnage, customer, expected_date,
                 calculated_date, "", "", remark, serial_no, "", ""
             )
-            target_row = empty_row
+    except Exception as e:
+        print(f"[Async Write Error] {e}")
 
-        result = resp.json()
 
-        if "responses" not in result:
-            return jsonify({"success": False, "error": f"写入数据失败: {json.dumps(result, ensure_ascii=False)}"})
+@app.route('/api/calculate-date', methods=['POST'])
+@require_auth
+def calculate_date():
+    """计算可发货日期：优化版本，先返回结果，后台异步写入"""
+    try:
+        data = request.json
+        model = data.get('model', '')
+        tonnage = data.get('tonnage', '')
+        customer = data.get('customer', '')
+        expected_date = data.get('expected_date', '')
+        pending_row_index = data.get('pending_row_index', 0)
+
+        # 1. 使用本地计算引擎计算可发货日期（核心操作，约800ms）
+        calculated_date, error_msg = calculate_delivery_date(model, tonnage, expected_date)
+
+        # 2. 立即返回结果给用户，不等待写入操作
+        # 前端只需要calculated_date，row_index用于后续提交时复用
+        # 这里返回pending_row_index或0，让前端在真正提交时再处理行号
+
+        # 3. 后台异步写入数据（不阻塞响应）
+        thread = threading.Thread(
+            target=async_write_to_sheet,
+            args=(model, tonnage, customer, expected_date, calculated_date, pending_row_index)
+        )
+        thread.daemon = True
+        thread.start()
 
         return jsonify({
             "success": True,
             "calculated_date": calculated_date,
-            "row_index": target_row
+            "row_index": pending_row_index  # 返回前端传来的行号，如果是0表示需要新建
         })
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
