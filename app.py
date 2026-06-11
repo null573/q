@@ -482,13 +482,15 @@ def get_orders():
             # 检查权限
             row_submitter_id = row_data[10]
             if not is_admin:
-                # 非管理员只能看自己的
+                # 非管理员只能看自己的（submitter_id为空的也显示）
                 if submitter_id and row_submitter_id and row_submitter_id != submitter_id:
                     continue
             else:
                 # 管理员根据view_mode筛选
-                if view_mode == 'mine' and submitter_id and row_submitter_id and row_submitter_id != submitter_id:
-                    continue
+                if view_mode == 'mine':
+                    # 只看submitter_id匹配的订单
+                    if row_submitter_id and row_submitter_id != submitter_id:
+                        continue
 
             # 检查期望发货日期是否大于等于今天（>=今天）
             expected_date_str = row_data[3]
@@ -516,6 +518,14 @@ def get_orders():
                 "submit_time": row_data[11]
             }
             orders.append(order)
+        
+        # 默认按排队日期升序排列（空日期排最后）
+        def sort_key(o):
+            qd = o.get("queue_date", "")
+            if qd and len(qd) >= 10:
+                return (0, qd)
+            return (1, "")
+        orders.sort(key=sort_key)
         
         # 分页
         total = len(orders)

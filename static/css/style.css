@@ -379,24 +379,21 @@ body {
 }
 
 /* 管理员筛选样式 */
-.admin-filter-container {
-    padding: 10px 20px 0;
-}
-
 .admin-filter {
     display: flex;
-    gap: 10px;
+    gap: 8px;
 }
 
 .admin-filter button {
-    padding: 8px 16px;
+    padding: 6px 14px;
     border: 1px solid #667eea;
     background: #fff;
     color: #667eea;
     border-radius: 6px;
     cursor: pointer;
-    font-size: 14px;
+    font-size: 13px;
     transition: all 0.2s;
+    white-space: nowrap;
 }
 
 .admin-filter button:hover {
