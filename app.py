@@ -132,7 +132,7 @@ def is_user_admin(employee_id):
 
 
 def parse_cell_value(cell_value):
-    """解析单元格值，统一返回字符串"""
+    """解析单元格值，统一返回字符串，过滤Excel空日期默认值"""
     if not cell_value:
         return ""
     if "text" in cell_value:
@@ -141,7 +141,11 @@ def parse_cell_value(cell_value):
         return str(cell_value["number"])
     if "time" in cell_value:
         t = cell_value["time"]
-        return f"{t['year']}-{t['month']:02d}-{t['day']:02d}"
+        result = f"{t['year']}-{t['month']:02d}-{t['day']:02d}"
+        # 过滤Excel空日期默认值
+        if result == "1899-12-30":
+            return ""
+        return result
     if "select" in cell_value:
         vals = cell_value["select"].get("value", [])
         return vals[0] if vals else ""

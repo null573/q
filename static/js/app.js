@@ -488,10 +488,12 @@ function renderOrders(orders) {
         <tbody>`;
 
     orders.forEach(order => {
-        // 排队日期只显示月日
+        // 排队日期只显示月日，过滤Excel空日期默认值1899-12-30
         let queueDateDisplay = escapeHtml(order.queue_date);
-        if (queueDateDisplay && queueDateDisplay.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        if (queueDateDisplay && queueDateDisplay.match(/^\d{4}-\d{2}-\d{2}$/) && queueDateDisplay !== '1899-12-30') {
             queueDateDisplay = queueDateDisplay.substring(5); // 取 MM-DD
+        } else {
+            queueDateDisplay = '';
         }
         html += `<tr>
             <td class="td-model">${escapeHtml(order.model)}</td>
