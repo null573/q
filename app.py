@@ -6,6 +6,7 @@ import os
 from datetime import datetime
 import functools
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from calc_engine import calculate_delivery_date
 
 app = Flask(__name__)
@@ -429,50 +430,67 @@ _orders_cache = {"data": None, "timestamp": 0}
 _filtered_cache = {"mine": None, "all": None, "timestamp": 0}
 CACHE_TTL = 60  # 缓存60秒
 
+def _read_batch(sheet_id, range_str):
+    """读取一批数据，供并行调用"""
+    return read_sheet_range(sheet_id, range_str)
+
 def fetch_all_orders_raw():
-    """从腾讯表格读取所有订单原始数据，带缓存"""
+    """从腾讯表格读取所有订单原始数据，带缓存，并行读取加速"""
     now = datetime.now().timestamp()
     if _orders_cache["data"] is not None and (now - _orders_cache["timestamp"]) < CACHE_TTL:
         return _orders_cache["data"]
 
-    # Step 1: 快速扫描A列，找到数据边界（每批500行）
+    # Step 1: 并行扫描A列，找到数据边界（4个线程，每批500行）
     last_data_row = 1
+    scan_ranges = []
     batch_size = 500
     for offset in range(0, 2000, batch_size):
         start = offset + 1
         end = offset + batch_size
-        range_str = f"A{start}:A{end}"
-        grid_data = read_sheet_range(SHEET_ID, range_str)
-        rows = grid_data.get("rows", [])
-        if not rows:
-            break
-        for i, row in enumerate(rows):
-            actual_row = start + i
-            values = row.get("values", [])
-            if values:
-                cv = values[0].get("cellValue")
-                if cv:
-                    text = parse_cell_value(cv)
-                    if text.strip():
-                        last_data_row = actual_row
-        if len(rows) < batch_size:
-            break
+        scan_ranges.append((start, end))
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {executor.submit(_read_batch, SHEET_ID, f"A{s}:A{e}"): (s, e) for s, e in scan_ranges}
+        for future in as_completed(futures):
+            grid_data = future.result()
+            rows = grid_data.get("rows", [])
+            start, end = futures[future]
+            for i, row in enumerate(rows):
+                actual_row = start + i
+                values = row.get("values", [])
+                if values:
+                    cv = values[0].get("cellValue")
+                    if cv:
+                        text = parse_cell_value(cv)
+                        if text.strip():
+                            last_data_row = actual_row
 
     if last_data_row <= 1:
         _orders_cache["data"] = []
         _orders_cache["timestamp"] = now
         return []
 
-    # Step 2: 只读取有数据的范围（A2:Llast_data_row），每批200行
-    all_rows = []
+    # Step 2: 并行读取有数据的范围（A2:Llast_data_row），每批200行
+    all_rows_by_offset = {}
+    data_ranges = []
     batch_size = 200
     for offset in range(1, last_data_row, batch_size):
-        start = offset + 1  # 从第2行开始（跳过表头）
+        start = offset + 1
         end = min(offset + batch_size, last_data_row)
-        range_str = f"A{start}:L{end}"
-        grid_data = read_sheet_range(SHEET_ID, range_str)
-        rows = grid_data.get("rows", [])
-        all_rows.extend(rows)
+        data_ranges.append((offset, start, end))
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {executor.submit(_read_batch, SHEET_ID, f"A{s}:L{e}"): (offset, s, e) for offset, s, e in data_ranges}
+        for future in as_completed(futures):
+            grid_data = future.result()
+            rows = grid_data.get("rows", [])
+            offset = futures[future][0]
+            all_rows_by_offset[offset] = rows
+
+    # 按offset排序合并
+    all_rows = []
+    for offset in sorted(all_rows_by_offset.keys()):
+        all_rows.extend(all_rows_by_offset[offset])
 
     # Step 3: 解析数据
     orders = []
@@ -550,6 +568,16 @@ def get_filtered_orders(submitter_id, is_admin, view_mode):
             try:
                 expected_date = datetime.strptime(expected_date_str, "%Y-%m-%d").date()
                 if expected_date < today:
+                    continue
+            except:
+                pass
+
+        # 排队日期过滤：仅显示排队日期>=今天的订单
+        queue_date_str = order["queue_date"]
+        if queue_date_str:
+            try:
+                queue_date = datetime.strptime(queue_date_str, "%Y-%m-%d").date()
+                if queue_date < today:
                     continue
             except:
                 pass

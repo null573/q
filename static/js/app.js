@@ -9,6 +9,20 @@ let viewMode = 'mine'; // 'mine' 或 'all'
 const API_BASE = '';
 const PER_PAGE = 20;
 
+// 2小时无操作自动退出
+let _idleTimer = null;
+const IDLE_TIMEOUT = 2 * 60 * 60 * 1000; // 2小时
+function resetIdleTimer() {
+    if (_idleTimer) clearTimeout(_idleTimer);
+    _idleTimer = setTimeout(() => {
+        doLogout();
+    }, IDLE_TIMEOUT);
+}
+['click', 'keydown', 'scroll', 'touchstart'].forEach(evt => {
+    document.addEventListener(evt, resetIdleTimer, { passive: true });
+});
+resetIdleTimer();
+
 // 从localStorage读取密码、员工ID和用户名
 let accessPassword = localStorage.getItem('accessPassword') || '';
 let employeeId = localStorage.getItem('employeeId') || '';
