@@ -200,6 +200,7 @@ async function loadModels() {
             modelOptions = data.models;
             populateModelSelect('model', data.models);
             populateModelSelect('editModel', data.models);
+            populateFilterModelSelect();
         } else {
             showToast('加载型号列表失败: ' + data.error, 'error');
         }
@@ -508,9 +509,13 @@ function isRecentlyDeletedOrder(order) {
 
 function populateFilterModelSelect() {
     const select = document.getElementById('filterModel');
+    if (!select) return;
     const currentVal = select.value;
-    // 收集所有唯一型号
-    const models = [...new Set(allOrders.map(o => o.model).filter(Boolean))].sort();
+    // 筛选下拉使用完整型号表，兼容订单中存在但型号表暂未返回的型号
+    const models = [...new Set([
+        ...modelOptions,
+        ...allOrders.map(o => o.model)
+    ].filter(Boolean))].sort();
     select.innerHTML = '<option value="">全部型号</option>';
     models.forEach(model => {
         const option = document.createElement('option');
