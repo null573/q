@@ -782,8 +782,6 @@ def get_orders():
         submitter_name = request.args.get('submitter_name', '')
         is_admin = is_user_admin(submitter_id)
         view_mode = request.args.get('view_mode', 'mine' if not is_admin else 'all')
-        if view_mode == 'mine' or not is_admin:
-            clear_order_caches()
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
         if page < 1:
