@@ -624,19 +624,10 @@ function escapeHtml(text) {
 }
 
 function filterOrders() {
-    const keyword = document.getElementById('filterInput').value.toLowerCase();
     const modelFilter = document.getElementById('filterModel').value;
-    const customerFilter = document.getElementById('filterCustomer').value.toLowerCase();
+    const customerFilter = document.getElementById('filterCustomer').value.trim().toLowerCase();
 
-    let filtered = allOrders;
-
-    if (keyword) {
-        filtered = filtered.filter(order =>
-            (order.model && order.model.toLowerCase().includes(keyword)) ||
-            (order.customer && order.customer.toLowerCase().includes(keyword)) ||
-            (order.tonnage && order.tonnage.toString().includes(keyword))
-        );
-    }
+    let filtered = [...allOrders];
 
     if (modelFilter) {
         filtered = filtered.filter(order => order.model === modelFilter);
@@ -648,16 +639,19 @@ function filterOrders() {
         );
     }
 
-    renderOrders(filtered);
+    renderOrders(sortOrderList(filtered));
 }
 
 function sortOrders() {
+    filterOrders();
+}
+
+function sortOrderList(orders) {
     const sortType = document.getElementById('sortSelect').value;
     if (!sortType) {
-        renderOrders(allOrders);
-        return;
+        return orders;
     }
-    const sorted = [...allOrders].sort((a, b) => {
+    return [...orders].sort((a, b) => {
         switch(sortType) {
             case 'model': return (a.model || '').localeCompare(b.model || '');
             case 'queueDate': return new Date(a.queue_date || 0) - new Date(b.queue_date || 0);
@@ -665,7 +659,6 @@ function sortOrders() {
             default: return 0;
         }
     });
-    renderOrders(sorted);
 }
 
 async function openEditModal(rowIndex) {
