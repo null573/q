@@ -1024,7 +1024,11 @@ async function deleteOrder(rowIndex) {
     const deletedOrder = allOrders.find(order => Number(order.row_index) === Number(rowIndex));
     try {
         const submitterNameParam = `&submitter_name=${encodeURIComponent(currentUser.name || '')}`;
-        const response = await apiFetch(`${API_BASE}/api/orders/${rowIndex}?submitter_id=${encodeURIComponent(currentUser.id || '')}${submitterNameParam}`, { method: 'DELETE' });
+        const response = await apiFetch(`${API_BASE}/api/orders/${rowIndex}?submitter_id=${encodeURIComponent(currentUser.id || '')}${submitterNameParam}`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ order: deletedOrder || {} })
+        });
         const data = await response.json();
         if (data.success) {
             showToast('排队删除成功！', 'success');

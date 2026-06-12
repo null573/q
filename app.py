@@ -325,18 +325,20 @@ def write_order_row(row_index_0based, model, tonnage, customer, expected_date, c
 
 
 def delete_row(row_index_1based):
-    """删除一行（row_index_1based从1开始）"""
+    """清空一行内容（row_index_1based从1开始），不删除物理行，避免下面订单行号上移"""
     if row_index_1based < 2:
         raise ValueError("无效行号，不能删除表头或不存在的行")
 
-    start_index = row_index_1based - 1  # 腾讯文档API使用0-based索引
+    empty_values = [build_cell_value("") for _ in range(12)]
     body = {
         "requests": [{
-            "deleteDimensionRequest": {
+            "updateRangeRequest": {
                 "sheetId": SHEET_ID,
-                "dimension": "ROW",
-                "startIndex": start_index,
-                "endIndex": start_index + 1
+                "gridData": {
+                    "startRow": row_index_1based - 1,
+                    "startColumn": 0,
+                    "rows": [{"values": empty_values}]
+                }
             }
         }]
     }
@@ -684,6 +686,18 @@ def is_same_submitter(order, submitter_id, submitter_name):
     return False
 
 
+def order_matches_expected(order, expected):
+    """删除前校验当前行仍是用户点选的订单，防止行号变化导致误删"""
+    if not expected:
+        return True
+    keys = ["model", "customer", "submitter_id", "submit_time"]
+    for key in keys:
+        expected_value = str(expected.get(key, "") or "").strip()
+        if expected_value and str(order.get(key, "") or "").strip() != expected_value:
+            return False
+    return True
+
+
 def resolve_submitter_name(submitter_id, submitter_name=""):
     """优先使用前端传来的姓名；没有姓名时按员工号从用户表查姓名"""
     name = str(submitter_name or "").strip()
@@ -921,6 +935,8 @@ def update_order(row_index):
 def delete_order(row_index):
     """删除订单：管理员可删除所有，其他人只能删除自己的"""
     try:
+        data = request.get_json(silent=True) or {}
+        expected_order = data.get("order") or data
         submitter_id = request.args.get('submitter_id', '')
         submitter_name = request.args.get('submitter_name', '')
         is_admin = is_user_admin(submitter_id)
@@ -931,9 +947,14 @@ def delete_order(row_index):
         if rows:
             orig_values = [parse_cell_value(v.get("cellValue")) for v in rows[0].get("values", [])]
             original_order = {
+                "model": orig_values[0] if len(orig_values) > 0 else "",
+                "customer": orig_values[2] if len(orig_values) > 2 else "",
                 "submitter": orig_values[6] if len(orig_values) > 6 else "",
-                "submitter_id": orig_values[10] if len(orig_values) > 10 else ""
+                "submitter_id": orig_values[10] if len(orig_values) > 10 else "",
+                "submit_time": orig_values[11] if len(orig_values) > 11 else ""
             }
+            if not order_matches_expected(original_order, expected_order):
+                return jsonify({"success": False, "error": "订单行号已变化，请刷新后重试，未执行删除"})
             # 权限检查：非管理员只能操作自己的数据
             if not is_admin and not is_same_submitter(original_order, submitter_id, submitter_name):
                 return jsonify({"success": False, "error": "无权删除他人订单"})
@@ -943,11 +964,6 @@ def delete_order(row_index):
         resp = delete_row(row_index)
         result = resp.json()
         if "responses" in result:
-            deleted = result["responses"][0].get("deleteDimensionResponse", {}).get("deleted", 0)
-            if deleted > 0:
-                clear_order_caches()
-                return jsonify({"success": True, "message": "订单删除成功"})
-            # 部分腾讯文档API响应不返回deleted字段，只要有responses即代表请求已执行
             clear_order_caches()
             return jsonify({"success": True, "message": "订单删除成功"})
         return jsonify({"success": False, "error": json.dumps(result, ensure_ascii=False)})
