@@ -3,9 +3,10 @@ from flask_cors import CORS
 import requests
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import functools
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from calc_engine import calculate_delivery_date
 
@@ -28,9 +29,31 @@ ACCESS_TOKEN = os.environ.get('ACCESS_TOKEN', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXV
 OPEN_ID = os.environ.get('OPEN_ID', '9bc172e5338147d8a35c1438ea8d1577')
 
 BASE_URL = "https://docs.qq.com/openapi/spreadsheet/v3"
+HTTP = requests.Session()
 
 # 访问密码
 ACCESS_PASSWORD = os.environ.get('ACCESS_PASSWORD', 'queue2025')
+
+BEIJING_TZ = timezone(timedelta(hours=8))
+USER_CACHE_TTL = 120
+MODEL_CACHE_TTL = 300
+
+_users_cache = {"data": None, "timestamp": 0}
+_models_cache = {"data": None, "timestamp": 0}
+
+
+def get_beijing_time_str():
+    """返回北京时间字符串，用于写入腾讯表提交时间"""
+    return datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
+
+
+@app.after_request
+def add_no_cache_headers(response):
+    """禁止浏览器和中间层缓存接口响应，避免删除后列表仍显示旧数据"""
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 # ============ 授权中间件 ============
@@ -101,9 +124,13 @@ def get_headers():
 
 
 def read_users():
-    """读取用户表（A2:D30），返回 [{name, employee_id, password, is_admin}, ...]"""
-    url = f"{BASE_URL}/files/{USER_FILE_ID}/{USER_SHEET_ID}/A2:D30"
-    resp = requests.get(url, headers=get_headers(), timeout=30)
+    """读取用户表，带短时缓存，返回 [{name, employee_id, password, is_admin}, ...]"""
+    now = time.time()
+    if _users_cache["data"] is not None and (now - _users_cache["timestamp"]) < USER_CACHE_TTL:
+        return _users_cache["data"]
+
+    url = f"{BASE_URL}/files/{USER_FILE_ID}/{USER_SHEET_ID}/A2:D200"
+    resp = HTTP.get(url, headers=get_headers(), timeout=30)
     users = []
     if resp.status_code == 200:
         data = resp.json()
@@ -120,6 +147,8 @@ def read_users():
                     "password": row_data[2],
                     "is_admin": is_admin
                 })
+    _users_cache["data"] = users
+    _users_cache["timestamp"] = now
     return users
 
 
@@ -127,7 +156,7 @@ def is_user_admin(employee_id):
     """检查用户是否是管理员"""
     users = read_users()
     for user in users:
-        if user["employee_id"] == employee_id:
+        if normalize_user_key(user["employee_id"]) == normalize_user_key(employee_id):
             return user.get("is_admin", False)
     return False
 
@@ -178,18 +207,26 @@ def build_cell_value(value, is_date=False, is_number=False, font_size=14):
             cell = {"cellValue": {"text": str(value)}}
     else:
         cell = {"cellValue": {"text": str(value)}}
-    
-    # 设置字号（腾讯文档API使用size字段，单位是半个点half-points，即size=28表示字号14）
+
+    # 设置字号：腾讯表格读取到的实际格式字段是 cellFormat.textFormat.fontSize
     if font_size:
-        cell["textFormat"] = {"size": font_size * 2}
-    
+        text_format = {
+            "fontSize": font_size,
+            "font": "SimSun"
+        }
+        cell["cellFormat"] = {
+            "textFormat": text_format
+        }
+        # 保留兼容字段，避免不同接口版本识别差异
+        cell["textFormat"] = text_format
+
     return cell
 
 
 def read_sheet_range(sheet_id, range_str):
     """读取表格范围数据，返回gridData"""
     url = f"{BASE_URL}/files/{FILE_ID}/{sheet_id}/{range_str}"
-    resp = requests.get(url, headers=get_headers(), timeout=30)
+    resp = HTTP.get(url, headers=get_headers(), timeout=30)
     if resp.status_code == 200:
         data = resp.json()
         return data.get("gridData", {})
@@ -206,7 +243,7 @@ def get_next_empty_row(sheet_id):
         range_str = f"A{start}:A{end}"
         grid_data = read_sheet_range(sheet_id, range_str)
         rows = grid_data.get("rows", [])
-        
+
         for i in range(len(rows)):
             row = rows[i]
             actual_row = start + i  # 1-based实际行号
@@ -222,14 +259,14 @@ def get_next_empty_row(sheet_id):
                         break
             if not has_data:
                 return actual_row
-    
+
     return 2001  # 如果前2000行都满了
 
 
 def batch_update(requests_body):
     """执行批量更新操作"""
     url = f"{BASE_URL}/files/{FILE_ID}/batchUpdate"
-    resp = requests.post(url, headers=get_headers(), json=requests_body)
+    resp = HTTP.post(url, headers=get_headers(), json=requests_body, timeout=30)
     return resp
 
 
@@ -248,7 +285,7 @@ def write_order_row(row_index_0based, model, tonnage, customer, expected_date, c
     """
     # 构建整行12列数据
     queue_date_is_date = is_date_string(queue_date)
-    
+
     # E列值
     if calculated_date and is_date_string(calculated_date):
         e_value = build_cell_value(calculated_date, is_date=True)
@@ -256,7 +293,7 @@ def write_order_row(row_index_0based, model, tonnage, customer, expected_date, c
         e_value = build_cell_value(calculated_date)
     else:
         e_value = build_cell_value("")
-    
+
     row_values = [
         build_cell_value(model),                        # A: 型号
         build_cell_value(tonnage, is_number=True),      # B: 吨位
@@ -271,7 +308,7 @@ def write_order_row(row_index_0based, model, tonnage, customer, expected_date, c
         build_cell_value(submitter_id),                  # K: 提交人ID
         build_cell_value(submit_time),                   # L: 提交时间
     ]
-    
+
     body = {
         "requests": [{
             "updateRangeRequest": {
@@ -289,13 +326,17 @@ def write_order_row(row_index_0based, model, tonnage, customer, expected_date, c
 
 def delete_row(row_index_1based):
     """删除一行（row_index_1based从1开始）"""
+    if row_index_1based < 2:
+        raise ValueError("无效行号，不能删除表头或不存在的行")
+
+    start_index = row_index_1based - 1  # 腾讯文档API使用0-based索引
     body = {
         "requests": [{
             "deleteDimensionRequest": {
                 "sheetId": SHEET_ID,
                 "dimension": "ROW",
-                "startIndex": row_index_1based,
-                "endIndex": row_index_1based + 1
+                "startIndex": start_index,
+                "endIndex": start_index + 1
             }
         }]
     }
@@ -314,6 +355,10 @@ def index():
 def get_models():
     """获取型号列表（从牌号表格A列）"""
     try:
+        now = time.time()
+        if _models_cache["data"] is not None and (now - _models_cache["timestamp"]) < MODEL_CACHE_TTL:
+            return jsonify({"success": True, "models": _models_cache["data"]})
+
         grid_data = read_sheet_range(MODEL_SHEET_ID, "A1:A100")
         rows = grid_data.get("rows", [])
         models = []
@@ -324,6 +369,8 @@ def get_models():
                     text = parse_cell_value(cv)
                     if text:
                         models.append(text)
+        _models_cache["data"] = models
+        _models_cache["timestamp"] = now
         return jsonify({"success": True, "models": models})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
@@ -433,7 +480,7 @@ def create_order():
         row_index = data.get('row_index', 0)  # 1-based，由calculate_date返回
 
         remark = f"{tonnage}{customer}"
-        submit_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        submit_time = get_beijing_time_str()
 
         if row_index > 0:
             # 检查该行A列是否为空，如果不为空则找新行
@@ -448,7 +495,7 @@ def create_order():
                         if text.strip():
                             a_col_empty = False
                             break
-            
+
             if a_col_empty:
                 # A列为空，可以写入
                 write_row_idx = row_index - 1  # 转为0-based
@@ -466,7 +513,7 @@ def create_order():
 
         # 计算可发货日期（用于写入E列，有缓存）
         calc_date_for_write, _ = calculate_delivery_date(model, tonnage, expected_date)
-        
+
         resp = write_order_row(
             write_row_idx, model, tonnage, customer, expected_date,
             calc_date_for_write, queue_date, submitter, remark, serial_no, submitter_id, submit_time
@@ -476,6 +523,7 @@ def create_order():
         if "responses" in result:
             updated = result["responses"][0].get("updateRangeResponse", {}).get("updatedCells", 0)
             if updated > 0:
+                clear_order_caches()
                 return jsonify({"success": True, "message": "订单创建成功"})
             return jsonify({"success": False, "error": "写入0个单元格"})
         else:
@@ -487,9 +535,24 @@ def create_order():
 
 # 全局缓存：原始订单数据（不过滤权限和日期）
 _orders_cache = {"data": None, "timestamp": 0}
-# 全局缓存：过滤+排序后的结果（按view_mode缓存）
-_filtered_cache = {"mine": None, "all": None, "timestamp": 0}
+# 全局缓存：过滤+排序后的结果（按用户和view_mode缓存）
+_filtered_cache = {"timestamp": 0}
 CACHE_TTL = 60  # 缓存60秒
+
+def clear_order_caches():
+    """清空订单相关缓存，确保增删改后页面重新读取腾讯表最新数据"""
+    _orders_cache["data"] = None
+    _orders_cache["timestamp"] = 0
+    _filtered_cache.clear()
+    _filtered_cache["timestamp"] = 0
+    _pending_row_cache["data"] = None
+    _pending_row_cache["timestamp"] = 0
+
+
+def clear_user_caches():
+    """清空用户缓存，用于改密码后立即生效"""
+    _users_cache["data"] = None
+    _users_cache["timestamp"] = 0
 
 def _read_batch(sheet_id, range_str):
     """读取一批数据，供并行调用"""
@@ -595,17 +658,57 @@ def fetch_all_orders_raw():
     _orders_cache["data"] = orders
     _orders_cache["timestamp"] = now
     # 清除过滤缓存（原始数据已更新）
-    _filtered_cache["mine"] = None
-    _filtered_cache["all"] = None
+    _filtered_cache.clear()
+    _filtered_cache["timestamp"] = 0
     return orders
 
-def get_filtered_orders(submitter_id, is_admin, view_mode):
+def normalize_user_key(value):
+    """标准化员工号，兼容腾讯表数字单元格可能出现的20150465.0"""
+    text = str(value or "").strip()
+    if text.endswith(".0"):
+        text = text[:-2]
+    return text
+
+
+def is_same_submitter(order, submitter_id, submitter_name):
+    """判断订单是否属于当前用户：优先员工号，兼容历史数据按姓名兜底"""
+    current_id = normalize_user_key(submitter_id)
+    row_id = normalize_user_key(order.get("submitter_id", ""))
+    current_name = str(submitter_name or "").strip()
+    row_name = str(order.get("submitter", "")).strip()
+
+    if current_id and row_id and current_id == row_id:
+        return True
+    if current_name and row_name and current_name == row_name:
+        return True
+    return False
+
+
+def resolve_submitter_name(submitter_id, submitter_name=""):
+    """优先使用前端传来的姓名；没有姓名时按员工号从用户表查姓名"""
+    name = str(submitter_name or "").strip()
+    if name and name != "用户":
+        return name
+
+    current_id = normalize_user_key(submitter_id)
+    if not current_id:
+        return name
+    for user in read_users():
+        if normalize_user_key(user.get("employee_id", "")) == current_id:
+            return str(user.get("name", "")).strip()
+    return name
+
+
+def get_filtered_orders(submitter_id, is_admin, view_mode, submitter_name=""):
     """获取过滤+排序后的订单列表，带缓存"""
     now = datetime.now().timestamp()
-    cache_key = "all" if is_admin and view_mode == "all" else "mine"
+    submitter_name = resolve_submitter_name(submitter_id, submitter_name)
+    is_mine_view = (not is_admin) or view_mode == "mine"
+    cache_key = "all" if is_admin and view_mode == "all" else f"mine:{normalize_user_key(submitter_id)}:{submitter_name}"
 
     # 检查过滤缓存是否有效（基于原始数据的时间戳）
-    if (_filtered_cache[cache_key] is not None and
+    if (not is_mine_view and
+        _filtered_cache.get(cache_key) is not None and
         _filtered_cache["timestamp"] == _orders_cache["timestamp"] and
         (now - _orders_cache["timestamp"]) < CACHE_TTL):
         return _filtered_cache[cache_key]
@@ -617,15 +720,13 @@ def get_filtered_orders(submitter_id, is_admin, view_mode):
     # 过滤
     orders = []
     for order in all_orders:
-        row_submitter_id = order["submitter_id"]
-
         # 权限过滤
         if not is_admin:
-            if submitter_id and row_submitter_id and row_submitter_id != submitter_id:
+            if not is_same_submitter(order, submitter_id, submitter_name):
                 continue
         else:
             if view_mode == 'mine':
-                if not row_submitter_id or row_submitter_id != submitter_id:
+                if not is_same_submitter(order, submitter_id, submitter_name):
                     continue
 
         # 期望发货日期过滤：仅显示期望发货日期>=今天的订单
@@ -648,9 +749,10 @@ def get_filtered_orders(submitter_id, is_admin, view_mode):
         return (1, "")
     orders.sort(key=sort_key)
 
-    # 存入缓存
-    _filtered_cache[cache_key] = orders
-    _filtered_cache["timestamp"] = _orders_cache["timestamp"]
+    # 只缓存全部排队；我的排队不缓存，避免已有订单因旧缓存消失
+    if not is_mine_view:
+        _filtered_cache[cache_key] = orders
+        _filtered_cache["timestamp"] = _orders_cache["timestamp"]
     return orders
 
 
@@ -659,9 +761,15 @@ def get_filtered_orders(submitter_id, is_admin, view_mode):
 def get_orders():
     """获取订单列表：管理员可查看所有或仅自己的；仅显示期望发货日期>=今天的订单；支持分页"""
     try:
+        if request.args.get('_ts') or request.args.get('refresh') == '1':
+            clear_order_caches()
+
         submitter_id = request.args.get('submitter_id', '')
+        submitter_name = request.args.get('submitter_name', '')
         is_admin = is_user_admin(submitter_id)
         view_mode = request.args.get('view_mode', 'mine' if not is_admin else 'all')
+        if view_mode == 'mine' or not is_admin:
+            clear_order_caches()
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
         if page < 1:
@@ -672,7 +780,7 @@ def get_orders():
             per_page = 100
 
         # 使用缓存的过滤结果
-        orders = get_filtered_orders(submitter_id, is_admin, view_mode)
+        orders = get_filtered_orders(submitter_id, is_admin, view_mode, submitter_name)
 
         # 分页
         total = len(orders)
@@ -702,6 +810,7 @@ def get_order(row_index):
     """获取单条订单：直接读取指定行，速度快"""
     try:
         submitter_id = request.args.get('submitter_id', '')
+        submitter_name = request.args.get('submitter_name', '')
         is_admin = is_user_admin(submitter_id)
 
         # 直接读取指定行
@@ -723,11 +832,6 @@ def get_order(row_index):
 
         row_data = [get_col(j) for j in range(12)]
 
-        # 检查权限
-        row_submitter_id = row_data[10]
-        if not is_admin and submitter_id and row_submitter_id and row_submitter_id != submitter_id:
-            return jsonify({"success": False, "error": "无权查看他人订单"})
-
         order = {
             "row_index": row_index,
             "model": row_data[0],
@@ -740,9 +844,13 @@ def get_order(row_index):
             "remark": row_data[7],
             "serial_no": row_data[8],
             "last_entry": row_data[9],
-            "submitter_id": row_submitter_id,
+            "submitter_id": row_data[10],
             "submit_time": row_data[11]
         }
+
+        # 检查权限
+        if not is_admin and not is_same_submitter(order, submitter_id, submitter_name):
+            return jsonify({"success": False, "error": "无权查看他人订单"})
 
         return jsonify({"success": True, "order": order})
     except Exception as e:
@@ -772,9 +880,12 @@ def update_order(row_index):
         if rows:
             orig_values = [parse_cell_value(v.get("cellValue")) for v in rows[0].get("values", [])]
             original_tonnage = orig_values[1] if len(orig_values) > 1 else "0"
-            row_submitter_id = orig_values[10] if len(orig_values) > 10 else ""
+            original_order = {
+                "submitter": orig_values[6] if len(orig_values) > 6 else "",
+                "submitter_id": orig_values[10] if len(orig_values) > 10 else ""
+            }
             # 权限检查：非管理员只能操作自己的数据
-            if not is_admin and row_submitter_id and row_submitter_id != submitter_id:
+            if not is_admin and not is_same_submitter(original_order, submitter_id, submitter):
                 return jsonify({"success": False, "error": "无权修改他人订单"})
             try:
                 if float(tonnage) > float(original_tonnage):
@@ -790,12 +901,13 @@ def update_order(row_index):
         calc_date_for_update, _ = calculate_delivery_date(model, tonnage, expected_date)
         resp = write_order_row(
             write_idx, model, tonnage, customer, expected_date,
-            calc_date_for_update, queue_date, submitter, remark, str(write_idx), submitter_id,
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            calc_date_for_update, queue_date, submitter, remark, str(row_index), submitter_id,
+            get_beijing_time_str()
         )
         result = resp.json()
 
         if "responses" in result:
+            clear_order_caches()
             return jsonify({"success": True, "message": "订单修改成功"})
         else:
             return jsonify({"success": False, "error": json.dumps(result, ensure_ascii=False)})
@@ -810,6 +922,7 @@ def delete_order(row_index):
     """删除订单：管理员可删除所有，其他人只能删除自己的"""
     try:
         submitter_id = request.args.get('submitter_id', '')
+        submitter_name = request.args.get('submitter_name', '')
         is_admin = is_user_admin(submitter_id)
 
         # 读取原订单检查权限
@@ -817,9 +930,12 @@ def delete_order(row_index):
         rows = grid_data.get("rows", [])
         if rows:
             orig_values = [parse_cell_value(v.get("cellValue")) for v in rows[0].get("values", [])]
-            row_submitter_id = orig_values[10] if len(orig_values) > 10 else ""
+            original_order = {
+                "submitter": orig_values[6] if len(orig_values) > 6 else "",
+                "submitter_id": orig_values[10] if len(orig_values) > 10 else ""
+            }
             # 权限检查：非管理员只能操作自己的数据
-            if not is_admin and row_submitter_id and row_submitter_id != submitter_id:
+            if not is_admin and not is_same_submitter(original_order, submitter_id, submitter_name):
                 return jsonify({"success": False, "error": "无权删除他人订单"})
         else:
             return jsonify({"success": False, "error": "订单不存在"})
@@ -829,7 +945,11 @@ def delete_order(row_index):
         if "responses" in result:
             deleted = result["responses"][0].get("deleteDimensionResponse", {}).get("deleted", 0)
             if deleted > 0:
+                clear_order_caches()
                 return jsonify({"success": True, "message": "订单删除成功"})
+            # 部分腾讯文档API响应不返回deleted字段，只要有responses即代表请求已执行
+            clear_order_caches()
+            return jsonify({"success": True, "message": "订单删除成功"})
         return jsonify({"success": False, "error": json.dumps(result, ensure_ascii=False)})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
@@ -855,8 +975,8 @@ def update_password():
             return jsonify({"success": False, "error": "密码必须同时包含字母和数字"})
 
         # 读取用户表找到对应行
-        url = f"{BASE_URL}/files/{USER_FILE_ID}/{USER_SHEET_ID}/A2:C30"
-        resp = requests.get(url, headers=get_headers(), timeout=30)
+        url = f"{BASE_URL}/files/{USER_FILE_ID}/{USER_SHEET_ID}/A2:C200"
+        resp = HTTP.get(url, headers=get_headers(), timeout=30)
         if resp.status_code != 200:
             return jsonify({"success": False, "error": "读取用户表失败"})
 
@@ -866,7 +986,7 @@ def update_password():
         for i, row in enumerate(rows):
             values = row.get("values", [])
             row_data = [parse_cell_value(v.get("cellValue")) for v in values]
-            if len(row_data) >= 2 and row_data[1] == employee_id:
+            if len(row_data) >= 2 and normalize_user_key(row_data[1]) == normalize_user_key(employee_id):
                 if len(row_data) >= 3 and row_data[2] == old_password:
                     target_row = i + 2  # A2 开始，所以 +2
                 else:
@@ -889,7 +1009,7 @@ def update_password():
                 }
             }]
         }
-        update_resp = requests.post(
+        update_resp = HTTP.post(
             f"{BASE_URL}/files/{USER_FILE_ID}/batchUpdate",
             headers=get_headers(),
             json=body,
@@ -897,6 +1017,7 @@ def update_password():
         )
         result = update_resp.json()
         if "responses" in result:
+            clear_user_caches()
             return jsonify({"success": True, "message": "密码修改成功"})
         else:
             return jsonify({"success": False, "error": json.dumps(result, ensure_ascii=False)})
@@ -910,7 +1031,7 @@ def test_connection():
     """测试腾讯表格连接"""
     try:
         url = f"{BASE_URL}/files/{FILE_ID}"
-        resp = requests.get(url, headers=get_headers())
+        resp = HTTP.get(url, headers=get_headers(), timeout=30)
         if resp.status_code == 200:
             data = resp.json()
             sheets = data.get("properties", [])

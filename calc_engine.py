@@ -8,6 +8,7 @@ import requests
 
 BASE_URL = "https://docs.qq.com/openapi/spreadsheet/v3"
 FILE_ID = "DRkR6aXhGcWxLYVFR"
+HTTP = requests.Session()
 
 # 型号 -> (工作表sheetId, 日期列起始行, 产能列字母, 上限日期单元格, 数据行数)
 MODEL_CONFIG = {
@@ -67,7 +68,7 @@ def parse_cell_value(cell_value):
 def read_sheet_range(sheet_id, range_str):
     """读取表格范围数据"""
     url = f"{BASE_URL}/files/{FILE_ID}/{sheet_id}/{range_str}"
-    resp = requests.get(url, headers=get_headers(), timeout=30)
+    resp = HTTP.get(url, headers=get_headers(), timeout=30)
     if resp.status_code == 200:
         data = resp.json()
         return data.get("gridData", {})

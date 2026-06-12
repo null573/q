@@ -1,4 +1,4 @@
-let currentUser = { name: '用户', id: 'auth_user' };
+let currentUser = { name: '用户', id: '' };
 let allOrders = [];
 let modelOptions = [];
 let pendingRowIndex = 0;
@@ -6,6 +6,10 @@ let currentPage = 1;
 let totalPages = 1;
 let isAdmin = false;
 let viewMode = 'mine'; // 'mine' 或 'all'
+let listenersInitialized = false;
+let ordersDirty = true;
+let recentlyDeletedOrders = new Map();
+const RECENT_DELETE_TTL = 30000;
 const API_BASE = '';
 const PER_PAGE = 20;
 
@@ -92,25 +96,35 @@ function hideAuthOverlay() {
 }
 
 async function loadAuthUsers() {
+    const select = document.getElementById('authUserSelect');
+    select.innerHTML = '<option value="">请选择员工</option>';
+    select.disabled = true;
+    document.getElementById('authError').textContent = '正在加载员工列表...';
+
     try {
-        const response = await fetch(`${API_BASE}/auth/users`);
+        const response = await fetch(`${API_BASE}/auth/users?_ts=${Date.now()}`, { cache: 'no-store' });
         const data = await response.json();
-        const select = document.getElementById('authUserSelect');
-        select.innerHTML = '<option value="">请选择员工</option>';
-        if (data.success && Array.isArray(data.users)) {
+        if (data.success && Array.isArray(data.users) && data.users.length > 0) {
+            select.disabled = false;
+            document.getElementById('authError').textContent = '';
             data.users.forEach(user => {
                 const option = document.createElement('option');
                 option.value = user.employee_id;
                 option.textContent = user.name;
                 select.appendChild(option);
             });
+        } else {
+            select.innerHTML = '<option value="">员工列表加载失败</option>';
+            document.getElementById('authError').textContent = data.error || '员工列表为空';
         }
     } catch (error) {
         console.error('加载用户列表失败', error);
+        select.innerHTML = '<option value="">员工列表加载失败</option>';
+        document.getElementById('authError').textContent = '加载员工列表失败，请稍后重试';
     }
 }
 
-function doAuth() {
+async function doAuth() {
     const selectedEmployeeId = document.getElementById('authUserSelect').value;
     const password = document.getElementById('authPassword').value.trim();
     if (!selectedEmployeeId) {
@@ -121,13 +135,13 @@ function doAuth() {
         document.getElementById('authError').textContent = '请输入密码';
         return;
     }
-    fetch(`${API_BASE}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ employee_id: selectedEmployeeId, password })
-    })
-    .then(r => r.json())
-    .then(data => {
+    try {
+        const response = await fetch(`${API_BASE}/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ employee_id: selectedEmployeeId, password })
+        });
+        const data = await response.json();
         if (data.success) {
             console.log('[doAuth] selectedEmployeeId=', selectedEmployeeId, 'before: employeeId=', employeeId, 'currentUser.id=', currentUser.id);
             accessPassword = data.access_password || '';
@@ -144,10 +158,9 @@ function doAuth() {
         } else {
             document.getElementById('authError').textContent = data.error || '密码错误';
         }
-    })
-    .catch(() => {
+    } catch (error) {
         document.getElementById('authError').textContent = '网络错误';
-    });
+    }
 }
 
 // 未提交排队的临时数据（页面关闭/刷新时清除）
@@ -179,17 +192,6 @@ function initApp() {
     startIdleTimer();
 }
 
-function initUser() {
-    const urlParams = new URLSearchParams(window.location.search);
-    const userName = urlParams.get('userName') || localStorage.getItem('userName') || '测试用户';
-    const userId = urlParams.get('userId') || localStorage.getItem('userId') || 'test_user_001';
-    currentUser.name = userName;
-    currentUser.id = userId;
-    document.getElementById('userName').textContent = userName;
-    localStorage.setItem('userName', userName);
-    localStorage.setItem('userId', userId);
-}
-
 async function loadModels() {
     try {
         const response = await apiFetch(`${API_BASE}/api/models`);
@@ -218,6 +220,9 @@ function populateModelSelect(selectId, models) {
 }
 
 function setupEventListeners() {
+    if (listenersInitialized) return;
+    listenersInitialized = true;
+
     document.getElementById('orderForm').addEventListener('submit', handleCreateOrder);
     document.getElementById('editForm').addEventListener('submit', handleUpdateOrder);
     document.getElementById('changePwdForm').addEventListener('submit', handleChangePassword);
@@ -407,6 +412,8 @@ async function handleCreateOrder(e) {
         const data = await response.json();
         if (data.success) {
             showToast('排队创建成功！', 'success');
+            ordersDirty = true;
+            allOrders = [];
             document.getElementById('orderForm').reset();
             // 重置为次日
             const tomorrow = new Date();
@@ -425,17 +432,26 @@ async function handleCreateOrder(e) {
     }
 }
 
-async function loadOrders(page = 1) {
+async function loadOrders(page = 1, forceRefresh = false) {
     const ordersList = document.getElementById('ordersList');
+    if (!currentUser.id || currentUser.id === 'auth_user' || currentUser.id === 'test_user_001') {
+        ordersList.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><p>登录信息异常，请退出后重新选择员工登录</p></div>';
+        showAuthOverlay('登录信息异常，请重新选择员工登录');
+        return;
+    }
     ordersList.innerHTML = '<div class="loading">加载中...</div>';
 
     try {
         currentPage = page;
         const viewModeParam = isAdmin ? `&view_mode=${viewMode}` : '';
-        const response = await apiFetch(`${API_BASE}/api/orders?submitter_id=${currentUser.id}&page=${page}&per_page=${PER_PAGE}${viewModeParam}`);
+        const refreshParam = forceRefresh ? `&_ts=${Date.now()}` : '';
+        const submitterNameParam = `&submitter_name=${encodeURIComponent(currentUser.name || '')}`;
+        const response = await apiFetch(`${API_BASE}/api/orders?submitter_id=${encodeURIComponent(currentUser.id || '')}${submitterNameParam}&page=${page}&per_page=${PER_PAGE}${viewModeParam}${refreshParam}`, {
+            cache: 'no-store'
+        });
         const data = await response.json();
         if (data.success) {
-            allOrders = data.orders;
+            allOrders = data.orders.filter(order => !isRecentlyDeletedOrder(order));
             currentPage = data.pagination.page;
             totalPages = data.pagination.total_pages;
             isAdmin = data.is_admin;
@@ -444,6 +460,7 @@ async function loadOrders(page = 1) {
             renderPagination();
             renderAdminFilter();
             populateFilterModelSelect();
+            ordersDirty = false;
         } else {
             ordersList.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><p>加载失败: ' + data.error + '</p></div>';
         }
@@ -451,6 +468,42 @@ async function loadOrders(page = 1) {
         console.error('[loadOrders] error:', error);
         ordersList.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><p>网络错误，请检查连接</p></div>';
     }
+}
+
+function getOrderSignature(order) {
+    if (!order) return '';
+    return [
+        order.model || '',
+        order.tonnage || '',
+        order.customer || '',
+        order.expected_date || '',
+        order.queue_date || '',
+        order.submitter || '',
+        order.submitter_id || '',
+        order.submit_time || ''
+    ].join('|');
+}
+
+function cleanupRecentlyDeletedOrders() {
+    const now = Date.now();
+    recentlyDeletedOrders.forEach((deletedAt, key) => {
+        if (now - deletedAt > RECENT_DELETE_TTL) {
+            recentlyDeletedOrders.delete(key);
+        }
+    });
+}
+
+function markOrderDeleted(order) {
+    const signature = getOrderSignature(order);
+    if (signature) {
+        recentlyDeletedOrders.set(signature, Date.now());
+    }
+}
+
+function isRecentlyDeletedOrder(order) {
+    cleanupRecentlyDeletedOrders();
+    const signature = getOrderSignature(order);
+    return Boolean(signature && recentlyDeletedOrders.has(signature));
 }
 
 function populateFilterModelSelect() {
@@ -533,7 +586,7 @@ function renderAdminFilter() {
 
 function switchViewMode(mode) {
     viewMode = mode;
-    loadOrders(1);
+    loadOrders(1, true);
 }
 
 function renderPagination() {
@@ -622,7 +675,8 @@ function sortOrders() {
 
 async function openEditModal(rowIndex) {
     try {
-        const response = await apiFetch(`${API_BASE}/api/orders/${rowIndex}?submitter_id=${currentUser.id}`);
+        const submitterNameParam = `&submitter_name=${encodeURIComponent(currentUser.name || '')}`;
+        const response = await apiFetch(`${API_BASE}/api/orders/${rowIndex}?submitter_id=${encodeURIComponent(currentUser.id || '')}${submitterNameParam}`);
         const data = await response.json();
         if (data.success) {
             const order = data.order;
@@ -954,8 +1008,9 @@ async function handleUpdateOrder(e) {
         const data = await response.json();
         if (data.success) {
             showToast('排队修改成功！', 'success');
+            ordersDirty = true;
             closeEditModal();
-            loadOrders();
+            loadOrders(currentPage, true);
         } else {
             showToast('排队修改失败: ' + data.error, 'error');
         }
@@ -966,12 +1021,21 @@ async function handleUpdateOrder(e) {
 
 async function deleteOrder(rowIndex) {
     if (!confirm('确定要删除这个排队吗？')) return;
+    const deletedOrder = allOrders.find(order => Number(order.row_index) === Number(rowIndex));
     try {
-        const response = await apiFetch(`${API_BASE}/api/orders/${rowIndex}?submitter_id=${currentUser.id}`, { method: 'DELETE' });
+        const submitterNameParam = `&submitter_name=${encodeURIComponent(currentUser.name || '')}`;
+        const response = await apiFetch(`${API_BASE}/api/orders/${rowIndex}?submitter_id=${encodeURIComponent(currentUser.id || '')}${submitterNameParam}`, { method: 'DELETE' });
         const data = await response.json();
         if (data.success) {
             showToast('排队删除成功！', 'success');
-            loadOrders();
+            markOrderDeleted(deletedOrder);
+            allOrders = allOrders.filter(order => Number(order.row_index) !== Number(rowIndex));
+            renderOrders(allOrders);
+            renderPagination();
+            populateFilterModelSelect();
+            ordersDirty = true;
+            loadOrders(currentPage, true);
+            setTimeout(() => loadOrders(currentPage, true), 1500);
         } else {
             showToast('排队删除失败: ' + data.error, 'error');
         }
@@ -985,7 +1049,7 @@ function showTab(tabName) {
     event.target.classList.add('active');
     document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
     document.getElementById(tabName + 'Tab').classList.add('active');
-    if (tabName === 'list') loadOrders();
+    if (tabName === 'list') loadOrders(1, ordersDirty || allOrders.length === 0);
 }
 
 function showToast(message, type = 'info') {
