@@ -155,25 +155,35 @@ def parse_cell_value(cell_value):
     return ""
 
 
-def build_cell_value(value, is_date=False, is_number=False):
-    """构建单元格写入值"""
+def build_cell_value(value, is_date=False, is_number=False, font_size=14):
+    """构建单元格写入值，支持设置字号"""
+    cell = {}
     if not value or str(value).strip() == "":
-        return {"cellValue": {"text": ""}}
-    if is_number:
+        cell = {"cellValue": {"text": ""}}
+    elif is_number:
         try:
-            return {"cellValue": {"number": float(value)}}
+            cell = {"cellValue": {"number": float(value)}}
         except (ValueError, TypeError):
-            pass
-    if is_date:
+            cell = {"cellValue": {"text": str(value)}}
+    elif is_date:
         try:
             parts = str(value).split("-")
             if len(parts) == 3 and len(parts[0]) == 4:
-                return {"cellValue": {"time": {
+                cell = {"cellValue": {"time": {
                     "year": int(parts[0]), "month": int(parts[1]), "day": int(parts[2])
                 }}}
+            else:
+                cell = {"cellValue": {"text": str(value)}}
         except:
-            pass
-    return {"cellValue": {"text": str(value)}}
+            cell = {"cellValue": {"text": str(value)}}
+    else:
+        cell = {"cellValue": {"text": str(value)}}
+    
+    # 设置字号
+    if font_size:
+        cell["textFormat"] = {"fontSize": font_size}
+    
+    return cell
 
 
 def read_sheet_range(sheet_id, range_str):
