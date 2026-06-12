@@ -589,7 +589,7 @@ def fetch_all_orders_raw():
                     if cv:
                         text = parse_cell_value(cv)
                         if text.strip():
-                            last_data_row = actual_row
+                            last_data_row = max(last_data_row, actual_row)
 
     if last_data_row <= 1:
         _orders_cache["data"] = []
