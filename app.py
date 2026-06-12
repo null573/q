@@ -179,9 +179,9 @@ def build_cell_value(value, is_date=False, is_number=False, font_size=14):
     else:
         cell = {"cellValue": {"text": str(value)}}
     
-    # 设置字号
+    # 设置字号（腾讯文档API使用size字段，单位是半个点half-points，即size=28表示字号14）
     if font_size:
-        cell["textFormat"] = {"fontSize": font_size}
+        cell["textFormat"] = {"size": font_size * 2}
     
     return cell
 
