@@ -8,7 +8,7 @@ import functools
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from calc_engine import calculate_delivery_date
+from calc_engine import MODEL_CONFIG, calculate_delivery_date
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
@@ -399,6 +399,8 @@ def get_models():
                     text = parse_cell_value(cv)
                     if text:
                         models.append(text)
+        # 合并计算配置中的型号，避免牌号表漏填时下拉选项不全
+        models = list(dict.fromkeys(models + list(MODEL_CONFIG.keys())))
         _models_cache["data"] = models
         _models_cache["timestamp"] = now
         return jsonify({"success": True, "models": models})
