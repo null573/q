@@ -187,9 +187,9 @@ def read_sheet_range(sheet_id, range_str):
 
 
 def get_next_empty_row(sheet_id):
-    """获取表格下一个空行号（1-based），从第3行开始扫描（跳过表头第1-2行）"""
-    # 分批读取，每批100行，优化速度
-    batch_size = 100
+    """获取表格下一个空行号（1-based），从A列第一个空行开始扫描（跳过表头第1行）"""
+    # 分批读取，每批200行，扫描到2000行
+    batch_size = 200
     for offset in range(0, 2000, batch_size):
         start = offset + 1  # 1-based
         end = offset + batch_size
@@ -200,7 +200,7 @@ def get_next_empty_row(sheet_id):
         for i in range(len(rows)):
             row = rows[i]
             actual_row = start + i  # 1-based实际行号
-            if actual_row < 3:
+            if actual_row < 2:
                 continue  # 跳过表头
             has_data = False
             for v in row.get("values", []):
@@ -494,37 +494,42 @@ def fetch_all_orders_raw():
 
     # Step 3: 解析数据
     orders = []
-    for i, row in enumerate(all_rows):
-        values = row.get("values", [])
-        if not values:
-            continue
+    current_row = 2  # 从第2行开始（跳过表头第1行）
+    for offset in sorted(all_rows_by_offset.keys()):
+        rows = all_rows_by_offset[offset]
+        start_row = offset + 1  # 该批次的起始行号（1-based）
+        for i, row in enumerate(rows):
+            actual_row = start_row + i  # 实际表格行号（1-based）
+            values = row.get("values", [])
+            if not values:
+                continue
 
-        def get_col(idx):
-            if idx < len(values):
-                cv = values[idx].get("cellValue")
-                if cv:
-                    return parse_cell_value(cv)
-            return ""
+            def get_col(idx):
+                if idx < len(values):
+                    cv = values[idx].get("cellValue")
+                    if cv:
+                        return parse_cell_value(cv)
+                return ""
 
-        row_data = [get_col(j) for j in range(12)]
-        if not row_data[0]:
-            continue
+            row_data = [get_col(j) for j in range(12)]
+            if not row_data[0]:
+                continue
 
-        orders.append({
-            "row_index": i + 2,  # 1-based（从第2行开始）
-            "model": row_data[0],
-            "tonnage": row_data[1],
-            "customer": row_data[2],
-            "expected_date": row_data[3],
-            "calculated_date": row_data[4],
-            "queue_date": row_data[5],
-            "submitter": row_data[6],
-            "remark": row_data[7],
-            "serial_no": row_data[8],
-            "last_entry": row_data[9],
-            "submitter_id": row_data[10],
-            "submit_time": row_data[11]
-        })
+            orders.append({
+                "row_index": actual_row,  # 实际表格行号（1-based）
+                "model": row_data[0],
+                "tonnage": row_data[1],
+                "customer": row_data[2],
+                "expected_date": row_data[3],
+                "calculated_date": row_data[4],
+                "queue_date": row_data[5],
+                "submitter": row_data[6],
+                "remark": row_data[7],
+                "serial_no": row_data[8],
+                "last_entry": row_data[9],
+                "submitter_id": row_data[10],
+                "submit_time": row_data[11]
+            })
 
     _orders_cache["data"] = orders
     _orders_cache["timestamp"] = now
