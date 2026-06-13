@@ -4,34 +4,53 @@
     box-sizing: border-box;
 }
 
+:root {
+    --primary: #5b6ee1;
+    --primary-dark: #6f49b8;
+    --primary-soft: #eef1ff;
+    --danger: #e74c3c;
+    --success: #27ae60;
+    --text-main: #243044;
+    --text-muted: #728096;
+    --line: #e7eaf2;
+    --surface: #ffffff;
+    --surface-soft: #f7f8fc;
+    --shadow-sm: 0 4px 14px rgba(36, 48, 68, 0.08);
+    --shadow-md: 0 10px 28px rgba(36, 48, 68, 0.12);
+}
+
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
-    background-color: #f5f5f5;
-    color: #333;
+    background:
+        radial-gradient(circle at 20% 0%, rgba(102,126,234,0.16), transparent 28%),
+        linear-gradient(180deg, #f4f6ff 0%, #f7f8fc 38%, #ffffff 100%);
+    color: var(--text-main);
     line-height: 1.6;
 }
 
 .container {
     max-width: 100%;
     min-height: 100vh;
-    background: #fff;
+    background: rgba(255,255,255,0.92);
 }
 
 .header {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(135deg, var(--primary) 0%, #7564d8 48%, var(--primary-dark) 100%);
     color: white;
-    padding: 15px 20px;
+    padding: 16px 20px;
     display: flex;
     justify-content: space-between;
     align-items: center;
     position: sticky;
     top: 0;
     z-index: 100;
+    box-shadow: 0 8px 22px rgba(91,110,225,0.25);
 }
 
 .header h1 {
-    font-size: 18px;
-    font-weight: 600;
+    font-size: 19px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
 }
 
 .user-info {
@@ -41,11 +60,12 @@ body {
 
 .nav-tabs {
     display: flex;
-    background: #fff;
-    border-bottom: 1px solid #e0e0e0;
+    background: rgba(255,255,255,0.96);
+    border-bottom: 1px solid var(--line);
     position: sticky;
     top: 56px;
     z-index: 99;
+    box-shadow: 0 2px 10px rgba(36,48,68,0.04);
 }
 
 .tab-btn {
@@ -53,7 +73,7 @@ body {
     padding: 12px;
     border: none;
     background: #fff;
-    color: #666;
+    color: var(--text-muted);
     font-size: 15px;
     cursor: pointer;
     transition: all 0.3s;
@@ -61,8 +81,8 @@ body {
 }
 
 .tab-btn.active {
-    color: #667eea;
-    font-weight: 600;
+    color: var(--primary);
+    font-weight: 700;
 }
 
 .tab-btn.active::after {
@@ -72,7 +92,7 @@ body {
     left: 20%;
     right: 20%;
     height: 3px;
-    background: #667eea;
+    background: linear-gradient(90deg, var(--primary), #7a62dd);
     border-radius: 2px;
 }
 
@@ -88,6 +108,11 @@ body {
 .order-form {
     max-width: 600px;
     margin: 0 auto;
+    background: var(--surface);
+    border: 1px solid rgba(231,234,242,0.9);
+    border-radius: 18px;
+    padding: 20px;
+    box-shadow: var(--shadow-sm);
 }
 
 .form-group {
@@ -116,17 +141,19 @@ body {
     margin-bottom: 8px;
     font-size: 14px;
     font-weight: 500;
-    color: #555;
+    color: #4a566b;
 }
 
 .form-group input,
 .form-group select {
     width: 100%;
     padding: 12px 15px;
-    border: 1px solid #ddd;
-    border-radius: 8px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
     font-size: 15px;
-    transition: border-color 0.3s;
+    background: #fff;
+    color: var(--text-main);
+    transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
     -webkit-appearance: none;
     appearance: none;
 }
@@ -134,12 +161,13 @@ body {
 .form-group input:focus,
 .form-group select:focus {
     outline: none;
-    border-color: #667eea;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(91,110,225,0.14);
 }
 
 .form-group input[readonly] {
-    background: #f8f9fa;
-    color: #666;
+    background: var(--surface-soft);
+    color: #5d6880;
 }
 
 .required {
@@ -159,7 +187,7 @@ body {
     left: 0;
     width: 100%;
     height: 100%;
-    background: rgba(0,0,0,0.7);
+    background: rgba(18,24,38,0.66);
     z-index: 2000;
     display: flex;
     justify-content: center;
@@ -168,12 +196,13 @@ body {
 }
 
 .auth-box {
-    background: white;
-    border-radius: 16px;
+    background: rgba(255,255,255,0.98);
+    border-radius: 20px;
     padding: 32px 24px;
     width: 100%;
     max-width: 360px;
     text-align: center;
+    box-shadow: var(--shadow-md);
 }
 
 .auth-icon {
@@ -184,11 +213,11 @@ body {
 .auth-box h2 {
     font-size: 20px;
     margin-bottom: 8px;
-    color: #333;
+    color: var(--text-main);
 }
 
 .auth-box p {
-    color: #666;
+    color: var(--text-muted);
     font-size: 14px;
     margin-bottom: 4px;
 }
@@ -202,7 +231,7 @@ body {
 
 .auth-btn-wechat {
     padding: 14px 32px;
-    background: #667eea;
+    background: linear-gradient(135deg, var(--primary), var(--primary-dark));
     color: white;
     border: none;
     border-radius: 8px;
@@ -222,8 +251,8 @@ body {
 .auth-form input,
 .auth-form select {
     padding: 12px 15px;
-    border: 1px solid #ddd;
-    border-radius: 8px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
     font-size: 14px;
     width: 100%;
     box-sizing: border-box;
@@ -238,13 +267,13 @@ body {
 
 .auth-form select:focus {
     outline: none;
-    border-color: #667eea;
-    box-shadow: 0 0 0 2px rgba(102,126,234,0.15);
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(91,110,225,0.14);
 }
 
 .auth-form button {
     padding: 14px;
-    background: #667eea;
+    background: linear-gradient(135deg, var(--primary), var(--primary-dark));
     color: white;
     border: none;
     border-radius: 8px;
@@ -262,10 +291,10 @@ body {
 
 .btn-change-pwd,
 .btn-logout {
-    background: rgba(255,255,255,0.2);
+    background: rgba(255,255,255,0.18);
     color: white;
     border: 1px solid rgba(255,255,255,0.4);
-    border-radius: 4px;
+    border-radius: 999px;
     padding: 4px 10px;
     font-size: 12px;
     cursor: pointer;
@@ -273,7 +302,7 @@ body {
 }
 
 .btn-logout {
-    background: rgba(255,100,100,0.3);
+    background: rgba(255,100,100,0.28);
     border-color: rgba(255,100,100,0.5);
 }
 
@@ -289,22 +318,23 @@ body {
     flex: 1;
     padding: 14px;
     border: none;
-    border-radius: 8px;
+    border-radius: 10px;
     font-size: 16px;
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.3s;
+    transition: transform 0.2s, box-shadow 0.2s, opacity 0.2s;
 }
 
 .btn-submit {
-    background: #667eea;
+    background: linear-gradient(135deg, var(--primary), var(--primary-dark));
     color: white;
+    box-shadow: 0 8px 18px rgba(91,110,225,0.22);
 }
 
 .btn-reset,
 .btn-cancel {
-    background: #e0e0e0;
-    color: #666;
+    background: #edf0f7;
+    color: #536079;
 }
 
 .btn-submit:active,
@@ -315,7 +345,7 @@ body {
 
 .filter-bar {
     display: flex;
-    gap: 10px;
+    gap: 12px;
     margin-bottom: 20px;
 }
 
@@ -323,14 +353,26 @@ body {
 .filter-bar select {
     flex: 1;
     padding: 10px;
-    border: 1px solid #ddd;
-    border-radius: 6px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
     font-size: 14px;
+    background: #fff;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.filter-bar input:focus,
+.filter-bar select:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(91,110,225,0.12);
 }
 
 .orders-list {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+    border-radius: 14px;
+    box-shadow: var(--shadow-sm);
+    background: #fff;
 }
 
 .order-table {
@@ -347,25 +389,25 @@ body {
 }
 
 .order-table th {
-    background: #f0f2f5;
-    color: #555;
-    font-weight: 600;
+    background: linear-gradient(180deg, #f5f7fc, #eef1f8);
+    color: #4a566b;
+    font-weight: 700;
     padding: 10px 8px;
     text-align: left;
     white-space: nowrap;
-    border-bottom: 2px solid #e0e0e0;
+    border-bottom: 2px solid var(--line);
     font-size: 14px;
 }
 
 .order-table td {
     padding: 10px 8px;
-    border-bottom: 1px solid #f0f0f0;
-    color: #333;
+    border-bottom: 1px solid #eef1f6;
+    color: var(--text-main);
     vertical-align: middle;
 }
 
 .order-table tbody tr:hover {
-    background: #f8f9ff;
+    background: var(--primary-soft);
 }
 
 .order-table tbody tr:active {
@@ -374,7 +416,7 @@ body {
 
 .td-model {
     font-weight: 600;
-    color: #333;
+    color: #1f2a3d;
     white-space: nowrap;
 }
 
@@ -386,10 +428,10 @@ body {
 
 .admin-filter button {
     padding: 6px 14px;
-    border: 1px solid #667eea;
+    border: 1px solid var(--primary);
     background: #fff;
-    color: #667eea;
-    border-radius: 6px;
+    color: var(--primary);
+    border-radius: 999px;
     cursor: pointer;
     font-size: 13px;
     transition: all 0.2s;
@@ -397,12 +439,13 @@ body {
 }
 
 .admin-filter button:hover {
-    background: #f0f2ff;
+    background: var(--primary-soft);
 }
 
 .admin-filter button.active {
-    background: #667eea;
+    background: linear-gradient(135deg, var(--primary), #7564d8);
     color: #fff;
+    box-shadow: 0 6px 14px rgba(91,110,225,0.2);
 }
 
 /* 分页样式 */
@@ -420,16 +463,16 @@ body {
 
 .pagination button {
     padding: 8px 16px;
-    border: 1px solid #667eea;
+    border: 1px solid var(--primary);
     background: #fff;
-    color: #667eea;
-    border-radius: 6px;
+    color: var(--primary);
+    border-radius: 999px;
     cursor: pointer;
     font-size: 14px;
 }
 
 .pagination button:hover:not(:disabled) {
-    background: #667eea;
+    background: var(--primary);
     color: #fff;
 }
 
@@ -447,7 +490,7 @@ body {
 }
 
 .td-calc {
-    color: #667eea;
+    color: var(--primary);
     font-weight: 500;
 }
 
@@ -459,7 +502,7 @@ body {
 .btn-delete {
     padding: 5px 12px;
     border: none;
-    border-radius: 4px;
+    border-radius: 7px;
     font-size: 12px;
     cursor: pointer;
     margin-right: 4px;
@@ -467,12 +510,12 @@ body {
 }
 
 .btn-edit {
-    background: #667eea;
+    background: linear-gradient(135deg, var(--primary), #7564d8);
     color: white;
 }
 
 .btn-delete {
-    background: #e74c3c;
+    background: linear-gradient(135deg, var(--danger), #d83b2f);
     color: white;
 }
 
@@ -489,7 +532,7 @@ body {
     left: 0;
     width: 100%;
     height: 100%;
-    background: rgba(0,0,0,0.5);
+    background: rgba(18,24,38,0.55);
     z-index: 1000;
     justify-content: center;
     align-items: flex-end;
@@ -500,13 +543,14 @@ body {
 }
 
 .modal-content {
-    background: white;
+    background: #fff;
     width: 100%;
     max-height: 90vh;
     overflow-y: auto;
-    border-radius: 20px 20px 0 0;
+    border-radius: 22px 22px 0 0;
     padding: 20px;
     animation: slideUp 0.3s ease;
+    box-shadow: 0 -12px 32px rgba(18,24,38,0.18);
 }
 
 @keyframes slideUp {
@@ -540,10 +584,10 @@ body {
     top: 70px;
     left: 50%;
     transform: translateX(-50%) translateY(-100px);
-    background: #333;
+    background: #253044;
     color: white;
     padding: 12px 24px;
-    border-radius: 8px;
+    border-radius: 999px;
     font-size: 14px;
     z-index: 1001;
     opacity: 0;
@@ -556,23 +600,23 @@ body {
 }
 
 .toast.success {
-    background: #27ae60;
+    background: var(--success);
 }
 
 .toast.error {
-    background: #e74c3c;
+    background: var(--danger);
 }
 
 .loading {
     text-align: center;
     padding: 40px;
-    color: #999;
+    color: var(--text-muted);
 }
 
 .empty-state {
     text-align: center;
     padding: 60px 20px;
-    color: #999;
+    color: var(--text-muted);
 }
 
 .empty-state-icon {
@@ -585,10 +629,10 @@ body {
     max-width: 400px;
     margin: 40px auto;
     background: white;
-    border-radius: 16px;
+    border-radius: 20px;
     padding: 40px 24px;
     text-align: center;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+    box-shadow: var(--shadow-md);
 }
 
 .feedback-icon {
@@ -602,18 +646,18 @@ body {
 
 .feedback-card h2 {
     font-size: 22px;
-    color: #333;
+    color: var(--text-main);
     margin-bottom: 8px;
 }
 
 .feedback-desc {
-    color: #666;
+    color: var(--text-muted);
     font-size: 14px;
     margin-bottom: 24px;
 }
 
 .feedback-info {
-    background: #f8f9fa;
+    background: var(--surface-soft);
     border-radius: 12px;
     padding: 20px;
     margin-bottom: 16px;
@@ -634,7 +678,7 @@ body {
 }
 
 .feedback-label {
-    color: #888;
+    color: var(--text-muted);
     font-size: 14px;
     width: 48px;
     text-align: justify;
@@ -643,7 +687,7 @@ body {
 }
 
 .feedback-value {
-    color: #333;
+    color: var(--text-main);
     font-size: 16px;
     font-weight: 500;
 }
