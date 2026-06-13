@@ -704,14 +704,81 @@ body {
         font-size: 14px;
     }
     
-    .filter-bar {
-        flex-wrap: wrap;
+    /* 排队明细手机端筛选区：按目标图改成两行网格 */
+    #listTab {
+        padding: 0;
     }
-    
-    .filter-bar input,
-    .filter-bar select {
-        min-width: 45%;
-        font-size: 13px;
+
+    #listTab .filter-bar {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 0;
+        margin-bottom: 16px;
+        border-top: 1px solid #dfe3ea;
+        border-left: 1px solid #dfe3ea;
+        background: #fff;
+    }
+
+    #listTab #adminFilter,
+    #listTab #adminFilter .admin-filter {
+        display: contents;
+    }
+
+    #listTab #adminFilter button,
+    #listTab .filter-bar input,
+    #listTab .filter-bar select {
+        width: 100%;
+        min-width: 0;
+        height: 40px;
+        padding: 0 8px;
+        border: none;
+        border-right: 1px solid #dfe3ea;
+        border-bottom: 1px solid #dfe3ea;
+        border-radius: 0;
+        background-color: #fff;
+        color: #333;
+        font-size: 16px;
+        text-align: center;
+        box-shadow: none;
+    }
+
+    #listTab #adminFilter button {
+        grid-column: span 2;
+    }
+
+    #listTab #adminFilter button:nth-child(1) {
+        order: 1;
+    }
+
+    #listTab #adminFilter button:nth-child(2) {
+        order: 2;
+    }
+
+    #listTab #sortSelect {
+        grid-column: span 2;
+        order: 3;
+    }
+
+    #listTab #filterModel {
+        grid-column: span 3;
+        order: 4;
+    }
+
+    #listTab #filterCustomer {
+        grid-column: span 3;
+        order: 5;
+    }
+
+    #listTab #adminFilter button.active {
+        background: #fff;
+        color: #333;
+        font-weight: 600;
+    }
+
+    #listTab .orders-list,
+    #listTab .pagination-container {
+        padding-left: 20px;
+        padding-right: 20px;
     }
     
     .order-table {
