@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import requests
 
 BASE_URL = "https://docs.qq.com/openapi/spreadsheet/v3"
-FILE_ID = "DRkR6aXhGcWxLYVFR"
+FILE_ID = "DRnhDemRIS25mdnFF"
 HTTP = requests.Session()
 
 # 型号 -> (工作表sheetId, 日期列起始行, 产能列字母, 上限日期单元格, 数据行数)
