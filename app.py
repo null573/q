@@ -48,11 +48,27 @@ def get_beijing_time_str():
 
 
 @app.after_request
-def add_no_cache_headers(response):
-    """禁止浏览器和中间层缓存接口响应，避免删除后列表仍显示旧数据"""
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
+def add_cache_headers(response):
+    """静态资源强缓存；动态接口按数据实时性分别控制缓存"""
+    path = request.path or ""
+    if path.startswith("/static/"):
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        response.headers.pop("Pragma", None)
+        response.headers.pop("Expires", None)
+    elif path == "/api/models":
+        response.headers["Cache-Control"] = "private, max-age=300"
+        response.headers.pop("Pragma", None)
+        response.headers.pop("Expires", None)
+    elif path == "/auth/users":
+        response.headers["Cache-Control"] = "private, max-age=120"
+        response.headers.pop("Pragma", None)
+        response.headers.pop("Expires", None)
+    elif path == "/":
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    else:
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
     return response
 
 

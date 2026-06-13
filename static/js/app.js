@@ -10,9 +10,13 @@ let listenersInitialized = false;
 let ordersDirty = true;
 let recentlyDeletedOrders = new Map();
 let filterTimer = null;
+let ordersRequestSeq = 0;
+let modelsLoadedAt = 0;
 const RECENT_DELETE_TTL = 30000;
 const API_BASE = '';
 const PER_PAGE = 20;
+const MODEL_LOCAL_CACHE_KEY = 'queueModelOptionsV1';
+const MODEL_LOCAL_CACHE_TTL = 24 * 60 * 60 * 1000;
 
 // 从localStorage读取密码、员工ID和用户名
 let accessPassword = localStorage.getItem('accessPassword') || '';
@@ -103,7 +107,7 @@ async function loadAuthUsers() {
     document.getElementById('authError').textContent = '正在加载员工列表...';
 
     try {
-        const response = await fetch(`${API_BASE}/auth/users?_ts=${Date.now()}`, { cache: 'no-store' });
+        const response = await fetch(`${API_BASE}/auth/users`);
         const data = await response.json();
         if (data.success && Array.isArray(data.users) && data.users.length > 0) {
             select.disabled = false;
@@ -191,14 +195,38 @@ function initApp() {
     setupEditQueueDateListener();
     // 启动无操作检测
     startIdleTimer();
+    // 登录后空闲时预取排队明细，用户首次点开更快；不阻塞首屏表单
+    const prefetchOrders = () => {
+        if (ordersDirty && document.getElementById('listTab') && !document.getElementById('listTab').classList.contains('active')) {
+            loadOrders(1, false, { silent: true });
+        }
+    };
+    if ('requestIdleCallback' in window) {
+        requestIdleCallback(prefetchOrders, { timeout: 2500 });
+    } else {
+        setTimeout(prefetchOrders, 1200);
+    }
 }
 
 async function loadModels() {
+    const cached = getCachedModels();
+    if (cached.length) {
+        modelOptions = cached;
+        populateModelSelect('model', cached);
+        populateModelSelect('editModel', cached);
+        populateFilterModelSelect();
+    }
+
+    if (cached.length && Date.now() - modelsLoadedAt < MODEL_LOCAL_CACHE_TTL) {
+        return;
+    }
+
     try {
         const response = await apiFetch(`${API_BASE}/api/models`);
         const data = await response.json();
         if (data.success) {
             modelOptions = data.models;
+            cacheModels(data.models);
             populateModelSelect('model', data.models);
             populateModelSelect('editModel', data.models);
             populateFilterModelSelect();
@@ -208,6 +236,27 @@ async function loadModels() {
     } catch (error) {
         showToast('网络错误，请检查连接', 'error');
     }
+}
+
+function getCachedModels() {
+    try {
+        const raw = localStorage.getItem(MODEL_LOCAL_CACHE_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed.models)) return [];
+        modelsLoadedAt = parsed.time || 0;
+        if (Date.now() - modelsLoadedAt > MODEL_LOCAL_CACHE_TTL) return [];
+        return parsed.models;
+    } catch (e) {
+        return [];
+    }
+}
+
+function cacheModels(models) {
+    try {
+        localStorage.setItem(MODEL_LOCAL_CACHE_KEY, JSON.stringify({ time: Date.now(), models }));
+        modelsLoadedAt = Date.now();
+    } catch (e) {}
 }
 
 function populateModelSelect(selectId, models) {
@@ -434,14 +483,18 @@ async function handleCreateOrder(e) {
     }
 }
 
-async function loadOrders(page = 1, forceRefresh = false) {
+async function loadOrders(page = 1, forceRefresh = false, options = {}) {
     const ordersList = document.getElementById('ordersList');
     if (!currentUser.id || currentUser.id === 'auth_user' || currentUser.id === 'test_user_001') {
         ordersList.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><p>登录信息异常，请退出后重新选择员工登录</p></div>';
         showAuthOverlay('登录信息异常，请重新选择员工登录');
         return;
     }
-    ordersList.innerHTML = '<div class="loading">加载中...</div>';
+    const silent = Boolean(options.silent);
+    if (!silent) {
+        ordersList.innerHTML = '<div class="loading">加载中...</div>';
+    }
+    const requestSeq = ++ordersRequestSeq;
 
     try {
         currentPage = page;
@@ -453,9 +506,10 @@ async function loadOrders(page = 1, forceRefresh = false) {
         const sortType = encodeURIComponent(document.getElementById('sortSelect')?.value || '');
         const filterParams = `&model_filter=${modelFilter}&customer_filter=${customerFilter}&sort=${sortType}`;
         const response = await apiFetch(`${API_BASE}/api/orders?submitter_id=${encodeURIComponent(currentUser.id || '')}${submitterNameParam}&page=${page}&per_page=${PER_PAGE}${viewModeParam}${filterParams}${refreshParam}`, {
-            cache: 'no-store'
+            cache: forceRefresh ? 'no-store' : 'default'
         });
         const data = await response.json();
+        if (requestSeq !== ordersRequestSeq) return;
         if (data.success) {
             allOrders = data.orders.filter(order => !isRecentlyDeletedOrder(order));
             currentPage = data.pagination.page;
@@ -468,9 +522,11 @@ async function loadOrders(page = 1, forceRefresh = false) {
             populateFilterModelSelect();
             ordersDirty = false;
         } else {
+            if (silent) return;
             ordersList.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><p>加载失败: ' + data.error + '</p></div>';
         }
     } catch (error) {
+        if (requestSeq !== ordersRequestSeq || silent) return;
         console.error('[loadOrders] error:', error);
         ordersList.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><p>网络错误，请检查连接</p></div>';
     }
