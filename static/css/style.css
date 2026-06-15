@@ -870,3 +870,74 @@ body {
         max-height: 80vh;
     }
 }
+
+/* ===== 管理员凭证管理 ===== */
+.admin-alert-bar {
+    margin: 10px 0 16px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    background: #fff4f4;
+    border: 1px solid #f5c2c2;
+    color: #b22222;
+    font-size: 13px;
+    line-height: 1.6;
+    box-shadow: 0 2px 6px rgba(178, 34, 34, 0.08);
+}
+.admin-alert-bar.warn {
+    background: #fff8e6;
+    border-color: #f5d97a;
+    color: #8a6d00;
+}
+.admin-alert-bar ul { margin: 4px 0 0 18px; padding: 0; }
+
+.admin-card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 22px 22px 16px;
+    box-shadow: 0 6px 18px rgba(50, 50, 93, 0.06);
+}
+.admin-title { margin: 0 0 6px; font-size: 18px; color: #2c2f4a; }
+.admin-desc { color: #707386; font-size: 13px; margin: 0 0 16px; }
+.admin-items { display: flex; flex-direction: column; gap: 14px; }
+.admin-item {
+    border: 1px solid #e6e8f1;
+    border-radius: 10px;
+    padding: 14px;
+    background: #fafbff;
+}
+.admin-item-head {
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+    margin-bottom: 8px; flex-wrap: wrap;
+}
+.admin-item-name { font-weight: 600; color: #2c2f4a; font-size: 14px; }
+.admin-item-mask { color: #8a8fa3; font-size: 12px; font-family: ui-monospace, Menlo, monospace; }
+.admin-item-status { font-size: 12px; padding: 2px 8px; border-radius: 999px; }
+.admin-item-status.ok { background: #e7f7ed; color: #1f7a3b; }
+.admin-item-status.warn { background: #fff5d6; color: #8a6d00; }
+.admin-item-status.err { background: #fde7e7; color: #b22222; }
+.admin-item-row {
+    display: flex; gap: 8px; align-items: stretch; flex-wrap: wrap;
+}
+.admin-item-row input[type="password"] {
+    flex: 1 1 220px;
+    min-width: 0;
+    padding: 8px 10px;
+    border: 1px solid #d8dbe8;
+    border-radius: 6px;
+    font-size: 13px;
+    background: #fff;
+}
+.admin-item-row button {
+    border: none; border-radius: 6px; padding: 8px 14px;
+    font-size: 13px; cursor: pointer;
+}
+.admin-btn-validate { background: #eef1ff; color: #3848b3; }
+.admin-btn-update { background: #5b6ee1; color: #fff; }
+.admin-btn-validate:disabled, .admin-btn-update:disabled { opacity: 0.6; cursor: not-allowed; }
+.admin-item-msg { font-size: 12px; margin-top: 6px; min-height: 16px; }
+.admin-item-msg.ok { color: #1f7a3b; }
+.admin-item-msg.err { color: #b22222; }
+.admin-log {
+    margin-top: 14px; font-size: 12px; color: #6b6f80;
+    border-top: 1px dashed #e6e8f1; padding-top: 10px;
+}

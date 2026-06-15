@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>销售排队系统</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=33">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=34">
 </head>
 <body>
     <div id="authOverlay" class="auth-overlay" style="display:none;">
@@ -37,7 +37,10 @@
             <button class="tab-btn active" onclick="showTab('create', event)">订单排队</button>
             <button class="tab-btn" onclick="showTab('list', event)">排队明细</button>
             <button class="tab-btn" onclick="showTab('feedback', event)">问题反馈</button>
+            <button class="tab-btn admin-only" id="adminTabBtn" onclick="showTab('admin', event)" style="display:none;">管理员</button>
         </nav>
+
+        <div id="adminAlertBar" class="admin-alert-bar" style="display:none;"></div>
 
         <div id="createTab" class="tab-content active">
             <form id="orderForm" class="order-form" autocomplete="off">
@@ -117,6 +120,15 @@
                     </div>
                 </div>
                 <p class="feedback-tip">工作时间：周一至周五 8:30-17:30</p>
+            </div>
+        </div>
+
+        <div id="adminTab" class="tab-content">
+            <div class="admin-card">
+                <h2 class="admin-title">管理员凭证管理</h2>
+                <p class="admin-desc">仅李刚可见。三项凭证全部保存于后端加密存储，输入框不回显，日志只显示前 4 位 + 后 4 位，保存后立即生效。</p>
+                <div id="adminItems" class="admin-items"></div>
+                <div id="adminLog" class="admin-log"></div>
             </div>
         </div>
     </div>
@@ -199,6 +211,6 @@
 
     <div id="toast" class="toast"></div>
 
-    <script src="{{ url_for('static', filename='js/app.js') }}?v=33"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}?v=34"></script>
 </body>
 </html>

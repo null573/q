@@ -17,6 +17,12 @@ const API_BASE = '';
 const PER_PAGE = 20;
 const MODEL_LOCAL_CACHE_KEY = 'queueModelOptionsV1';
 const MODEL_LOCAL_CACHE_TTL = 24 * 60 * 60 * 1000;
+const ADMIN_EMPLOYEE_ID = '20150465';
+const ADMIN_KEY_LABELS = {
+    TENCENT_ACCESS_TOKEN: '腾讯 access_token',
+    RENDER_API_KEY: 'Render API Key',
+    CLOUDFLARE_API_TOKEN: 'Cloudflare API Token'
+};
 
 // 从localStorage读取密码、员工ID和用户名
 let accessPassword = localStorage.getItem('accessPassword') || '';
@@ -205,6 +211,13 @@ function initApp() {
         requestIdleCallback(prefetchOrders, { timeout: 2500 });
     } else {
         setTimeout(prefetchOrders, 1200);
+    }
+    // 仅李刚（员工号 20150465）启用管理员入口和凭证健康提醒
+    if (String(currentUser.id) === ADMIN_EMPLOYEE_ID) {
+        const btn = document.getElementById('adminTabBtn');
+        if (btn) btn.style.display = '';
+        adminHealthCheck();
+        setInterval(adminHealthCheck, 10 * 60 * 1000);
     }
 }
 
@@ -1114,6 +1127,7 @@ function showTab(tabName, evt) {
     document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
     document.getElementById(tabName + 'Tab').classList.add('active');
     if (tabName === 'list') loadOrders(1, ordersDirty || allOrders.length === 0);
+    if (tabName === 'admin') loadAdminStatus();
 }
 
 function showToast(message, type = 'info') {
@@ -1188,4 +1202,162 @@ function startIdleTimer() {
             showAuthOverlay('长时间未操作，请重新登录');
         }
     }, 30000); // 每30秒检查一次
+}
+
+// ============ 管理员凭证管理（仅李刚） ============
+
+function isAdminUser() {
+    return String(currentUser.id) === ADMIN_EMPLOYEE_ID;
+}
+
+function formatRemainingHours(seconds) {
+    if (!seconds || seconds <= 0) return '已过期';
+    if (seconds < 3600) return Math.floor(seconds / 60) + ' 分钟';
+    if (seconds < 24 * 3600) return Math.floor(seconds / 3600) + ' 小时';
+    return Math.floor(seconds / (24 * 3600)) + ' 天';
+}
+
+async function loadAdminStatus() {
+    if (!isAdminUser()) return;
+    const wrap = document.getElementById('adminItems');
+    wrap.innerHTML = '<div class="admin-item-msg">加载中…</div>';
+    try {
+        const r = await apiFetch(`${API_BASE}/api/admin/status`);
+        const data = await r.json();
+        if (!data.success) throw new Error(data.error || '加载失败');
+        renderAdminItems(data.items);
+    } catch (e) {
+        wrap.innerHTML = `<div class="admin-item-msg err">加载失败：${e.message}</div>`;
+    }
+}
+
+function renderAdminItems(items) {
+    const wrap = document.getElementById('adminItems');
+    wrap.innerHTML = '';
+    items.forEach(item => {
+        const card = document.createElement('div');
+        card.className = 'admin-item';
+        const label = ADMIN_KEY_LABELS[item.name] || item.name;
+        let statusHtml = '';
+        if (!item.present) {
+            statusHtml = '<span class="admin-item-status warn">未配置</span>';
+        } else if (item.name === 'TENCENT_ACCESS_TOKEN' && typeof item.remaining_seconds === 'number') {
+            const remain = item.remaining_seconds;
+            if (remain <= 0) {
+                statusHtml = '<span class="admin-item-status err">已过期</span>';
+            } else if (remain < 24 * 3600) {
+                statusHtml = `<span class="admin-item-status warn">即将过期 ${formatRemainingHours(remain)}</span>`;
+            } else {
+                statusHtml = `<span class="admin-item-status ok">剩余 ${formatRemainingHours(remain)}</span>`;
+            }
+        } else {
+            statusHtml = '<span class="admin-item-status ok">已配置</span>';
+        }
+        const mask = item.masked ? `当前：<span class="admin-item-mask">${item.masked}</span>` : '<span class="admin-item-mask">尚未保存</span>';
+        card.innerHTML = `
+            <div class="admin-item-head">
+                <span class="admin-item-name">${label}</span>
+                ${statusHtml}
+            </div>
+            <div class="admin-item-mask" style="margin-bottom:8px;">${mask}</div>
+            <div class="admin-item-row">
+                <input type="password" autocomplete="new-password" placeholder="粘贴新的 ${label}，输入不会回显" data-key="${item.name}" />
+                <button type="button" class="admin-btn-validate" data-action="validate">校验</button>
+                <button type="button" class="admin-btn-update" data-action="update">加密保存</button>
+            </div>
+            <div class="admin-item-msg" data-msg></div>
+        `;
+        const input = card.querySelector('input');
+        const msg = card.querySelector('[data-msg]');
+        card.querySelector('[data-action="validate"]').addEventListener('click', () => onAdminValidate(item.name, input, msg));
+        card.querySelector('[data-action="update"]').addEventListener('click', () => onAdminUpdate(item.name, input, msg));
+        wrap.appendChild(card);
+    });
+}
+
+async function onAdminValidate(key, input, msg) {
+    const value = (input.value || '').trim();
+    if (!value) {
+        msg.className = 'admin-item-msg err';
+        msg.textContent = '请先粘贴新的值';
+        return;
+    }
+    msg.className = 'admin-item-msg';
+    msg.textContent = '校验中…';
+    try {
+        const r = await apiFetch(`${API_BASE}/api/admin/validate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key, value })
+        });
+        const data = await r.json();
+        if (data.success) {
+            msg.className = 'admin-item-msg ok';
+            msg.textContent = '校验通过，可加密保存';
+        } else {
+            msg.className = 'admin-item-msg err';
+            msg.textContent = '校验失败：' + (data.error || '未知错误');
+        }
+    } catch (e) {
+        msg.className = 'admin-item-msg err';
+        msg.textContent = '校验异常：' + e.message;
+    }
+}
+
+async function onAdminUpdate(key, input, msg) {
+    const value = (input.value || '').trim();
+    if (!value) {
+        msg.className = 'admin-item-msg err';
+        msg.textContent = '请先粘贴新的值';
+        return;
+    }
+    if (!confirm(`确认更新「${ADMIN_KEY_LABELS[key] || key}」？\n将写入后端加密存储，立即生效。`)) return;
+    msg.className = 'admin-item-msg';
+    msg.textContent = '正在校验并加密保存…';
+    try {
+        const r = await apiFetch(`${API_BASE}/api/admin/update`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key, value })
+        });
+        const data = await r.json();
+        if (data.success) {
+            msg.className = 'admin-item-msg ok';
+            msg.textContent = (data.message || '已更新') + (data.log ? `（日志：${data.log.key}=${data.log.masked}）` : '');
+            input.value = '';
+            const log = document.getElementById('adminLog');
+            const item = document.createElement('div');
+            const t = new Date().toLocaleString();
+            item.textContent = `[${t}] ${ADMIN_KEY_LABELS[key] || key} 已更新（${data.log ? data.log.masked : ''}），已加密保存并立即生效`;
+            log.prepend(item);
+            setTimeout(loadAdminStatus, 2000);
+        } else {
+            msg.className = 'admin-item-msg err';
+            msg.textContent = '更新失败：' + (data.error || '未知错误');
+        }
+    } catch (e) {
+        msg.className = 'admin-item-msg err';
+        msg.textContent = '更新异常：' + e.message;
+    }
+}
+
+async function adminHealthCheck() {
+    if (!isAdminUser()) return;
+    const bar = document.getElementById('adminAlertBar');
+    if (!bar) return;
+    try {
+        const r = await apiFetch(`${API_BASE}/api/admin/health`);
+        const data = await r.json();
+        if (!data.success || data.healthy) {
+            bar.style.display = 'none';
+            return;
+        }
+        const onlyWarn = (data.issues || []).every(i => i.level === 'warn');
+        bar.className = 'admin-alert-bar' + (onlyWarn ? ' warn' : '');
+        const lis = (data.issues || []).map(i => `<li>${ADMIN_KEY_LABELS[i.key] || i.key}：${i.message}</li>`).join('');
+        bar.innerHTML = `<strong>${onlyWarn ? '提醒' : '凭证异常'}</strong><ul>${lis}</ul>`;
+        bar.style.display = '';
+    } catch (e) {
+        bar.style.display = 'none';
+    }
 }

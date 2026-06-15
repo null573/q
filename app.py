@@ -3,11 +3,14 @@ from flask_cors import CORS
 import requests
 import json
 import os
+import base64
+import hashlib
 from datetime import datetime, timezone, timedelta
 import functools
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from cryptography.fernet import Fernet
 from calc_engine import MODEL_CONFIG, calculate_delivery_date
 
 app = Flask(__name__)
@@ -33,6 +36,14 @@ HTTP = requests.Session()
 
 # 访问密码
 ACCESS_PASSWORD = os.environ.get('ACCESS_PASSWORD', 'queue2025')
+ADMIN_EMPLOYEE_ID = "20150465"
+ADMIN_KEYS = ["TENCENT_ACCESS_TOKEN", "RENDER_API_KEY", "CLOUDFLARE_API_TOKEN"]
+ADMIN_SECRET_PREFIX = "admin_secret:"
+CLOUDFLARE_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
+ADMIN_KV_NAMESPACE_ID = os.environ.get("ADMIN_KV_NAMESPACE_ID", "")
+ADMIN_SECRET_KEY = os.environ.get("ADMIN_SECRET_KEY", "")
+CLOUDFLARE_API_TOKEN_BOOTSTRAP = os.environ.get("CLOUDFLARE_API_TOKEN", "")
+RENDER_API_KEY_BOOTSTRAP = os.environ.get("RENDER_API_KEY", "")
 
 BEIJING_TZ = timezone(timedelta(hours=8))
 USER_CACHE_TTL = 120
@@ -40,11 +51,115 @@ MODEL_CACHE_TTL = 300
 
 _users_cache = {"data": None, "timestamp": 0}
 _models_cache = {"data": None, "timestamp": 0}
+_admin_secret_cache = {"data": {}, "timestamp": 0}
+ADMIN_SECRET_CACHE_TTL = 30
 
 
 def get_beijing_time_str():
     """返回北京时间字符串，用于写入腾讯表提交时间"""
     return datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def mask_secret(value):
+    """只显示前4位和后4位，避免日志泄露密钥"""
+    if not value:
+        return ""
+    s = str(value)
+    if len(s) <= 8:
+        return f"{s[:1]}***{s[-1:]}"
+    return f"{s[:4]}***{s[-4:]}"
+
+
+def decode_token_expiry(token):
+    """解析 JWT access_token 的 exp 字段（秒）"""
+    if not token or not isinstance(token, str):
+        return 0
+    parts = token.split(".")
+    if len(parts) != 3:
+        return 0
+    try:
+        payload = parts[1] + "=" * ((4 - len(parts[1]) % 4) % 4)
+        data = json.loads(base64.urlsafe_b64decode(payload.encode()).decode())
+        exp = data.get("exp")
+        return int(exp) if isinstance(exp, (int, float)) else 0
+    except Exception:
+        return 0
+
+
+def _admin_fernet():
+    if not ADMIN_SECRET_KEY:
+        return None
+    key = base64.urlsafe_b64encode(hashlib.sha256(ADMIN_SECRET_KEY.encode()).digest())
+    return Fernet(key)
+
+
+def _kv_url(name):
+    return (
+        f"https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}"
+        f"/storage/kv/namespaces/{ADMIN_KV_NAMESPACE_ID}/values/{ADMIN_SECRET_PREFIX}{name}"
+    )
+
+
+def _kv_token():
+    # 读取 KV 必须先有一个引导 token；更新 Cloudflare Token 后仍以环境变量引导读写 KV。
+    return CLOUDFLARE_API_TOKEN_BOOTSTRAP
+
+
+def get_admin_secret(name):
+    """从 Cloudflare KV 读取加密密钥；失败时回退到 Render 环境变量，确保主服务不断。"""
+    now = time.time()
+    if (
+        name in _admin_secret_cache["data"]
+        and (now - _admin_secret_cache["timestamp"]) < ADMIN_SECRET_CACHE_TTL
+    ):
+        return _admin_secret_cache["data"][name]
+
+    fallback = os.environ.get(name, "")
+    if name == "TENCENT_ACCESS_TOKEN" and not fallback:
+        fallback = ACCESS_TOKEN
+    elif name == "RENDER_API_KEY" and not fallback:
+        fallback = RENDER_API_KEY_BOOTSTRAP
+    elif name == "CLOUDFLARE_API_TOKEN" and not fallback:
+        fallback = CLOUDFLARE_API_TOKEN_BOOTSTRAP
+
+    if not (CLOUDFLARE_ACCOUNT_ID and ADMIN_KV_NAMESPACE_ID and _kv_token() and _admin_fernet()):
+        return fallback
+
+    try:
+        resp = HTTP.get(_kv_url(name), headers={"Authorization": f"Bearer {_kv_token()}"}, timeout=10)
+        if resp.status_code == 404:
+            value = fallback
+        elif resp.status_code == 200 and resp.text:
+            value = _admin_fernet().decrypt(resp.text.encode()).decode()
+        else:
+            value = fallback
+    except Exception:
+        value = fallback
+
+    _admin_secret_cache["data"][name] = value
+    _admin_secret_cache["timestamp"] = now
+    return value
+
+
+def set_admin_secret(name, value):
+    """把密钥加密后写入 Cloudflare KV。"""
+    if not (CLOUDFLARE_ACCOUNT_ID and ADMIN_KV_NAMESPACE_ID and _kv_token() and _admin_fernet()):
+        raise RuntimeError("主服务尚未配置 ADMIN_KV_NAMESPACE_ID / ADMIN_SECRET_KEY / CLOUDFLARE_API_TOKEN")
+    encrypted = _admin_fernet().encrypt(str(value).encode()).decode()
+    resp = HTTP.put(
+        _kv_url(name),
+        headers={"Authorization": f"Bearer {_kv_token()}", "Content-Type": "text/plain"},
+        data=encrypted,
+        timeout=15,
+    )
+    try:
+        data = resp.json()
+    except Exception:
+        data = {}
+    if resp.status_code not in (200, 201) or data.get("success") is False:
+        raise RuntimeError(f"写入加密存储失败 {resp.status_code}: {str(data)[:200]}")
+    _admin_secret_cache["data"][name] = str(value)
+    _admin_secret_cache["timestamp"] = time.time()
 
 
 @app.after_request
@@ -81,6 +196,17 @@ def require_auth(f):
         password = request.headers.get('X-Access-Password', '')
         if password != ACCESS_PASSWORD:
             return jsonify({"success": False, "error": "未授权", "need_auth": True}), 401
+        return f(*args, **kwargs)
+    return decorated
+
+
+def require_ligang_admin(f):
+    """仅允许李刚（员工号 20150465）访问管理员凭证接口"""
+    @functools.wraps(f)
+    def decorated(*args, **kwargs):
+        employee_id = normalize_user_key(request.headers.get('X-Employee-Id', ''))
+        if employee_id != ADMIN_EMPLOYEE_ID:
+            return jsonify({"success": False, "error": "无管理员权限"}), 403
         return f(*args, **kwargs)
     return decorated
 
@@ -133,7 +259,7 @@ def get_headers():
     """获取腾讯表格API请求头"""
     return {
         "Content-Type": "application/json",
-        "Access-Token": ACCESS_TOKEN,
+        "Access-Token": get_admin_secret("TENCENT_ACCESS_TOKEN") or ACCESS_TOKEN,
         "Open-Id": OPEN_ID,
         "Client-Id": CLIENT_ID
     }
@@ -1131,6 +1257,176 @@ def update_password():
             return jsonify({"success": False, "error": json.dumps(result, ensure_ascii=False)})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
+
+
+# ============ 管理员凭证管理（仅李刚 20150465） ============
+
+def summarize_admin_key(name):
+    value = get_admin_secret(name)
+    item = {"name": name, "present": bool(value), "masked": mask_secret(value) if value else ""}
+    if name == "TENCENT_ACCESS_TOKEN" and value:
+        exp = decode_token_expiry(value)
+        item["expires_at"] = exp
+        if exp:
+            item["remaining_seconds"] = exp - int(time.time())
+            item["expires_at_text"] = datetime.fromtimestamp(exp, tz=timezone.utc).isoformat()
+    return item
+
+
+def validate_tencent_token(token):
+    try:
+        headers = {
+            "Content-Type": "application/json",
+            "Access-Token": token,
+            "Open-Id": OPEN_ID,
+            "Client-Id": CLIENT_ID,
+        }
+        url = f"{BASE_URL}/files/{USER_FILE_ID}/{USER_SHEET_ID}/A1:A1"
+        resp = HTTP.get(url, headers=headers, timeout=20)
+        text = resp.text
+        if resp.status_code != 200:
+            return False, f"腾讯接口 {resp.status_code}: {text[:160]}"
+        try:
+            data = resp.json()
+        except Exception:
+            return False, f"腾讯接口返回异常: {text[:160]}"
+        if data.get("code") and data.get("code") != 0:
+            return False, f"腾讯接口错误 code={data.get('code')}: {data.get('message', '')}"
+        if data.get("gridData") is not None:
+            return True, ""
+        return False, f"腾讯接口未返回数据: {text[:160]}"
+    except Exception as e:
+        return False, f"腾讯接口异常: {e}"
+
+
+def validate_render_key(token):
+    try:
+        resp = HTTP.get(
+            "https://api.render.com/v1/services?limit=1",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+            timeout=20,
+        )
+        if resp.status_code == 200:
+            return True, ""
+        return False, f"Render {resp.status_code}: {resp.text[:160]}"
+    except Exception as e:
+        return False, f"Render 接口异常: {e}"
+
+
+def validate_cloudflare_token(token):
+    try:
+        resp = HTTP.get(
+            "https://api.cloudflare.com/client/v4/user/tokens/verify",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            timeout=20,
+        )
+        data = resp.json() if resp.text else {}
+        if resp.status_code == 200 and data.get("success"):
+            return True, ""
+        return False, f"Cloudflare {resp.status_code}: {json.dumps(data.get('errors') or data, ensure_ascii=False)[:160]}"
+    except Exception as e:
+        return False, f"Cloudflare 接口异常: {e}"
+
+
+def validate_admin_key(key, value):
+    if key == "TENCENT_ACCESS_TOKEN":
+        return validate_tencent_token(value)
+    if key == "RENDER_API_KEY":
+        return validate_render_key(value)
+    if key == "CLOUDFLARE_API_TOKEN":
+        return validate_cloudflare_token(value)
+    return False, "未知配置项"
+
+
+@app.route('/api/admin/status', methods=['GET'])
+@require_auth
+@require_ligang_admin
+def admin_status():
+    return jsonify({"success": True, "items": [summarize_admin_key(k) for k in ADMIN_KEYS]})
+
+
+@app.route('/api/admin/validate', methods=['POST'])
+@require_auth
+@require_ligang_admin
+def admin_validate():
+    data = request.get_json(silent=True) or {}
+    key = data.get("key")
+    value = str(data.get("value") or "").strip()
+    if key not in ADMIN_KEYS:
+        return jsonify({"success": False, "error": "未知配置项"}), 400
+    if not value:
+        return jsonify({"success": False, "error": "请输入 token 后再校验"}), 400
+    ok, err = validate_admin_key(key, value)
+    return jsonify({"success": ok, "error": err})
+
+
+@app.route('/api/admin/update', methods=['POST'])
+@require_auth
+@require_ligang_admin
+def admin_update():
+    data = request.get_json(silent=True) or {}
+    key = data.get("key")
+    value = str(data.get("value") or "").strip()
+    if key not in ADMIN_KEYS:
+        return jsonify({"success": False, "error": "未知配置项"}), 400
+    if not value:
+        return jsonify({"success": False, "error": "请输入新的值"}), 400
+
+    ok, err = validate_admin_key(key, value)
+    if not ok:
+        return jsonify({"success": False, "error": f"校验未通过：{err}"}), 400
+
+    try:
+        set_admin_secret(key, value)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+    log_entry = {
+        "key": key,
+        "masked": mask_secret(value),
+        "by": ADMIN_EMPLOYEE_ID,
+        "at": datetime.now(timezone.utc).isoformat()
+    }
+    return jsonify({
+        "success": True,
+        "effective": True,
+        "storage": "encrypted_kv",
+        "message": "已加密保存，立即生效，无需重新部署",
+        "log": log_entry
+    })
+
+
+@app.route('/api/admin/health', methods=['GET'])
+@require_auth
+@require_ligang_admin
+def admin_health():
+    issues = []
+    token = get_admin_secret("TENCENT_ACCESS_TOKEN") or ACCESS_TOKEN
+    ok, err = validate_tencent_token(token)
+    if not ok:
+        issues.append({"key": "TENCENT_ACCESS_TOKEN", "level": "error", "message": err})
+
+    exp = decode_token_expiry(token)
+    if exp:
+        remain = exp - int(time.time())
+        if remain <= 0:
+            issues.append({"key": "TENCENT_ACCESS_TOKEN", "level": "error", "message": "腾讯 access_token 已过期，请尽快更新"})
+        elif remain < 24 * 3600:
+            issues.append({"key": "TENCENT_ACCESS_TOKEN", "level": "warn", "message": f"腾讯 access_token 将在 {remain // 3600} 小时内过期，请及时更新"})
+
+    render_key = get_admin_secret("RENDER_API_KEY")
+    if render_key:
+        ok, err = validate_render_key(render_key)
+        if not ok:
+            issues.append({"key": "RENDER_API_KEY", "level": "error", "message": err})
+
+    cf_key = get_admin_secret("CLOUDFLARE_API_TOKEN")
+    if cf_key:
+        ok, err = validate_cloudflare_token(cf_key)
+        if not ok:
+            issues.append({"key": "CLOUDFLARE_API_TOKEN", "level": "error", "message": err})
+
+    return jsonify({"success": True, "healthy": len(issues) == 0, "issues": issues})
 
 
 @app.route('/api/test-connection', methods=['GET'])
