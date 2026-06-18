@@ -867,6 +867,9 @@ def is_same_submitter(order, submitter_id, submitter_name):
         return True
     if current_name and row_name and current_name == row_name:
         return True
+    # 历史数据无提交者信息，对所有用户可见
+    if not row_id and not row_name:
+        return True
     return False
 
 
