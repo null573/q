@@ -852,11 +852,13 @@ def fetch_all_orders_raw():
     if not orders and _orders_cache["data"] is not None and len(_orders_cache["data"]) > 0:
         return _orders_cache["data"]
 
-    _orders_cache["data"] = orders
-    _orders_cache["timestamp"] = now
-    # 清除过滤缓存（原始数据已更新）
-    _filtered_cache.clear()
-    _filtered_cache["timestamp"] = 0
+    # 只有当解析结果非空时才更新缓存
+    if orders:
+        _orders_cache["data"] = orders
+        _orders_cache["timestamp"] = now
+        # 清除过滤缓存（原始数据已更新）
+        _filtered_cache.clear()
+        _filtered_cache["timestamp"] = 0
     return orders
 
 def normalize_user_key(value):
