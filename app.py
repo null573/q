@@ -378,7 +378,8 @@ def build_cell_value(value, is_date=False, is_number=False, font_size=14):
 def read_sheet_range(sheet_id, range_str):
     """读取表格范围数据，返回gridData"""
     url = f"{BASE_URL}/files/{FILE_ID}/{sheet_id}/{range_str}"
-    resp = TENCENT_HTTP.get(url, headers=get_headers(), timeout=30)
+    # 使用独立请求（不共享Session），避免连接池问题
+    resp = requests.get(url, headers=get_headers(), timeout=30, proxies={"http": None, "https": None})
     if resp.status_code == 200:
         data = resp.json()
         return data.get("gridData", {})
