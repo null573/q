@@ -991,7 +991,7 @@ def get_orders():
     """获取订单列表：管理员可查看所有或仅自己的；仅显示期望发货日期>=今天的订单；支持分页"""
     try:
         if request.args.get('_ts') or request.args.get('refresh') == '1':
-            clear_order_caches()
+            _orders_cache["timestamp"] = 0  # 标记缓存过期，但不清空数据（降级用）
 
         submitter_id = request.args.get('submitter_id', '')
         submitter_name = request.args.get('submitter_name', '')
