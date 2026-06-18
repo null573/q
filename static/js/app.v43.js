@@ -805,6 +805,7 @@ function renderOrders(orders) {
                 <th>型号</th>
                 <th>吨位</th>
                 ${canSeeCustomer ? '<th>客户</th>' : ''}
+                <th>业务员</th>
                 <th>排队日期</th>
                 ${canOperate ? '<th>操作</th>' : ''}
             </tr>
@@ -823,6 +824,7 @@ function renderOrders(orders) {
             <td class="td-model">${escapeHtml(order.model)}</td>
             <td>${escapeHtml(order.tonnage)}</td>
             ${canSeeCustomer ? '<td>' + escapeHtml(order.customer) + '</td>' : ''}
+            <td>${escapeHtml(order.submitter || '')}</td>
             <td>${queueDateDisplay}</td>
             ${canOperate ? `<td class="td-actions">
                 <button class="btn-edit" onclick="openEditModal(${order.row_index})">改</button>
