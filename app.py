@@ -1375,6 +1375,30 @@ def admin_validate():
     return jsonify({"success": ok, "error": err})
 
 
+@app.route('/api/admin/deploy', methods=['POST'])
+def admin_trigger_deploy():
+    """触发 Render 重新部署（无需认证，仅用于CI/CD）"""
+    render_key = get_admin_secret("RENDER_API_KEY")
+    if not render_key:
+        return jsonify({"success": False, "error": "未配置 RENDER_API_KEY"}), 500
+    try:
+        resp = HTTP.post(
+            f"https://api.render.com/v1/services/{RENDER_SERVICE_ID}/deploys",
+            headers={
+                "Authorization": f"Bearer {render_key}",
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+            json={"clearCache": "do_not_clear"},
+            timeout=15,
+        )
+        if resp.status_code in (200, 201, 409):
+            return jsonify({"success": True, "status": resp.status_code})
+        return jsonify({"success": False, "error": f"Render API 返回 {resp.status_code}"}), 502
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/admin/update', methods=['POST'])
 @require_auth
 @require_ligang_admin
