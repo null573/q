@@ -637,57 +637,44 @@ async function loadOrders(page = 1, forceRefresh = false, options = {}) {
         return;
     }
     const silent = Boolean(options.silent);
-    const maxRetries = options.maxRetries || 2;
     if (!silent) {
         ordersList.innerHTML = '<div class="loading">加载中...</div>';
     }
     const requestSeq = ++ordersRequestSeq;
 
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-        if (attempt > 0) {
-            await new Promise(r => setTimeout(r, 2000 * attempt));
-            if (requestSeq !== ordersRequestSeq) return;
+    try {
+        currentPage = page;
+        const viewModeParam = `&view_mode=${viewMode}`;
+        const refreshParam = forceRefresh ? `&_ts=${Date.now()}` : '';
+        const submitterNameParam = `&submitter_name=${encodeURIComponent(currentUser.name || '')}`;
+        const modelFilter = encodeURIComponent(document.getElementById('filterModel')?.value || '');
+        const customerFilter = encodeURIComponent(document.getElementById('filterCustomer')?.value.trim() || '');
+        const sortType = encodeURIComponent(document.getElementById('sortSelect')?.value || '');
+        const filterParams = `&model_filter=${modelFilter}&customer_filter=${customerFilter}&sort=${sortType}`;
+        const response = await apiFetch(`${API_BASE}/api/orders?submitter_id=${encodeURIComponent(currentUser.id || '')}${submitterNameParam}&page=${page}&per_page=${PER_PAGE}${viewModeParam}${filterParams}${refreshParam}`, {
+            cache: forceRefresh ? 'no-store' : 'default'
+        });
+        const data = await response.json();
+        if (requestSeq !== ordersRequestSeq) return;
+        if (data.success) {
+            allOrders = (data.orders || []).filter(order => !isRecentlyDeletedOrder(order));
+            currentPage = data.pagination?.page || 1;
+            totalPages = data.pagination?.total_pages || 1;
+            isAdmin = data.is_admin;
+            viewMode = data.view_mode;
+            renderOrders(allOrders);
+            renderPagination();
+            renderAdminFilter();
+            populateFilterModelSelect();
+            ordersDirty = false;
+        } else {
+            if (silent) return;
+            ordersList.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><p>加载失败: ' + data.error + '</p></div>';
         }
-        try {
-            currentPage = page;
-            const viewModeParam = `&view_mode=${viewMode}`;
-            const refreshParam = (forceRefresh || attempt > 0) ? `&_ts=${Date.now()}` : '';
-            const submitterNameParam = `&submitter_name=${encodeURIComponent(currentUser.name || '')}`;
-            const modelFilter = encodeURIComponent(document.getElementById('filterModel')?.value || '');
-            const customerFilter = encodeURIComponent(document.getElementById('filterCustomer')?.value.trim() || '');
-            const sortType = encodeURIComponent(document.getElementById('sortSelect')?.value || '');
-            const filterParams = `&model_filter=${modelFilter}&customer_filter=${customerFilter}&sort=${sortType}`;
-            const response = await apiFetch(`${API_BASE}/api/orders?submitter_id=${encodeURIComponent(currentUser.id || '')}${submitterNameParam}&page=${page}&per_page=${PER_PAGE}${viewModeParam}${filterParams}${refreshParam}`, {
-                cache: forceRefresh ? 'no-store' : 'default'
-            });
-            const data = await response.json();
-            if (requestSeq !== ordersRequestSeq) return;
-            if (data.success) {
-                allOrders = (data.orders || []).filter(order => !isRecentlyDeletedOrder(order));
-                currentPage = data.pagination?.page || 1;
-                totalPages = data.pagination?.total_pages || 1;
-                isAdmin = data.is_admin;
-                viewMode = data.view_mode;
-                renderOrders(allOrders);
-                renderPagination();
-                renderAdminFilter();
-                populateFilterModelSelect();
-                ordersDirty = false;
-                return; // 成功，退出重试循环
-            } else {
-                if (silent) return;
-                if (attempt === maxRetries) {
-                    ordersList.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><p>加载失败: ' + data.error + '</p></div>';
-                }
-            }
-        } catch (error) {
-            if (requestSeq !== ordersRequestSeq) return;
-            console.error('[loadOrders] error:', error, 'attempt', attempt);
-            if (attempt === maxRetries) {
-                if (silent) return;
-                ordersList.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><p>网络错误，请检查连接</p></div>';
-            }
-        }
+    } catch (error) {
+        if (requestSeq !== ordersRequestSeq || silent) return;
+        console.error('[loadOrders] error:', error);
+        ordersList.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><p>网络错误，请检查连接</p></div>';
     }
 }
 

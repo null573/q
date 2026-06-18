@@ -30,19 +30,10 @@ ACCESS_TOKEN = os.environ.get('ACCESS_TOKEN', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXV
 OPEN_ID = os.environ.get('OPEN_ID', '9bc172e5338147d8a35c1438ea8d1577')
 
 BASE_URL = "https://docs.qq.com/openapi/spreadsheet/v3"
-
-# 主Session用于Render/GitHub等外部API（可能走代理）
 HTTP = requests.Session()
 adapter = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=20, max_retries=2)
 HTTP.mount('https://', adapter)
 HTTP.mount('http://', adapter)
-
-# 腾讯表格专用Session，明确禁用代理
-TENCENT_HTTP = requests.Session()
-TENCENT_HTTP.trust_env = False
-tencent_adapter = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=20, max_retries=2)
-TENCENT_HTTP.mount('https://', tencent_adapter)
-TENCENT_HTTP.mount('http://', tencent_adapter)
 
 # 访问密码
 ACCESS_PASSWORD = os.environ.get('ACCESS_PASSWORD', 'queue2025')
@@ -744,6 +735,10 @@ def clear_user_caches():
     _users_cache["data"] = None
     _users_cache["timestamp"] = 0
 
+def _read_batch(sheet_id, range_str):
+    """读取一批数据，供并行调用"""
+    return read_sheet_range(sheet_id, range_str)
+
 def fetch_all_orders_raw():
     """从腾讯表格读取所有订单原始数据，带缓存，并行读取加速"""
     now = datetime.now().timestamp()
@@ -760,7 +755,7 @@ def fetch_all_orders_raw():
         scan_ranges.append((start, end))
 
     with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = {executor.submit(read_sheet_range, SHEET_ID, f"A{s}:A{e}"): (s, e) for s, e in scan_ranges}
+        futures = {executor.submit(_read_batch, SHEET_ID, f"A{s}:A{e}"): (s, e) for s, e in scan_ranges}
         for future in as_completed(futures):
             grid_data = future.result()
             rows = grid_data.get("rows", [])
@@ -795,7 +790,7 @@ def fetch_all_orders_raw():
         data_ranges.append((offset, start, end))
 
     with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = {executor.submit(read_sheet_range, SHEET_ID, f"A{s}:L{e}"): (offset, s, e) for offset, s, e in data_ranges}
+        futures = {executor.submit(_read_batch, SHEET_ID, f"A{s}:L{e}"): (offset, s, e) for offset, s, e in data_ranges}
         for future in as_completed(futures):
             grid_data = future.result()
             rows = grid_data.get("rows", [])
@@ -919,8 +914,7 @@ def can_operate_order(order, current_user, submitter_id, submitter_name, view_mo
         order_user = get_order_submitter_user(order)
         order_dept = str((order_user or {}).get("department", "")).strip()
         return bool(current_dept and order_dept and current_dept == order_dept)
-    # 全部排队模式下，历史数据（无提交者信息）也可见
-    return True
+    return is_same_submitter(order, submitter_id, submitter_name)
 
 
 def normalize_view_mode(current_user, requested_view_mode):
@@ -937,8 +931,7 @@ def get_filtered_orders(submitter_id, current_user, view_mode, submitter_name=""
     submitter_name = resolve_submitter_name(submitter_id, submitter_name)
     access_level = (current_user or {}).get("access_level", "self")
     is_mine_view = view_mode == "mine"
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    cache_key = f"{access_level}:{view_mode}:{normalize_user_key(submitter_id)}:{submitter_name}:{(current_user or {}).get('department', '')}:{today_str}"
+    cache_key = f"{access_level}:{view_mode}:{normalize_user_key(submitter_id)}:{submitter_name}:{(current_user or {}).get('department', '')}"
 
     # 检查过滤缓存是否有效（基于原始数据的时间戳）
     if (not is_mine_view and
