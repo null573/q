@@ -867,9 +867,6 @@ def is_same_submitter(order, submitter_id, submitter_name):
         return True
     if current_name and row_name and current_name == row_name:
         return True
-    # 历史数据无提交者信息，对所有用户可见
-    if not row_id and not row_name:
-        return True
     return False
 
 
@@ -917,7 +914,8 @@ def can_operate_order(order, current_user, submitter_id, submitter_name, view_mo
         order_user = get_order_submitter_user(order)
         order_dept = str((order_user or {}).get("department", "")).strip()
         return bool(current_dept and order_dept and current_dept == order_dept)
-    return is_same_submitter(order, submitter_id, submitter_name)
+    # 全部排队模式下，历史数据（无提交者信息）也可见
+    return True
 
 
 def normalize_view_mode(current_user, requested_view_mode):
