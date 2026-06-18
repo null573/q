@@ -170,6 +170,95 @@ body {
     color: #5d6880;
 }
 
+/* 型号可搜索下拉框 (combobox) */
+.model-combobox {
+    position: relative;
+    width: 100%;
+}
+
+.model-combobox input {
+    width: 100%;
+    padding: 12px 36px 12px 15px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    font-size: 15px;
+    background: #fff;
+    color: var(--text-main);
+    transition: border-color 0.2s, box-shadow 0.2s;
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.model-combobox input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(91,110,225,0.14);
+}
+
+.combobox-arrow {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 0;
+    height: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 6px solid #999;
+    pointer-events: none;
+    transition: transform 0.2s;
+}
+
+.model-combobox.open .combobox-arrow {
+    transform: translateY(-50%) rotate(180deg);
+}
+
+.combobox-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    max-height: 220px;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(36,48,68,0.12);
+    z-index: 500;
+    display: none;
+    margin: 0;
+    padding: 4px 0;
+    list-style: none;
+}
+
+.combobox-dropdown.show {
+    display: block;
+}
+
+.combobox-dropdown li {
+    padding: 10px 15px;
+    font-size: 14px;
+    color: var(--text-main);
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.combobox-dropdown li:hover,
+.combobox-dropdown li.highlighted {
+    background: var(--primary-soft);
+}
+
+.combobox-dropdown li.empty-msg {
+    color: #999;
+    cursor: default;
+    text-align: center;
+    font-size: 13px;
+}
+
+.combobox-dropdown li.empty-msg:hover {
+    background: transparent;
+}
+
 .required {
     color: #e74c3c;
 }
