@@ -254,7 +254,7 @@ def read_users():
         return _users_cache["data"]
 
     url = f"{BASE_URL}/files/{USER_FILE_ID}/{USER_SHEET_ID}/A2:F200"
-    resp = TENCENT_HTTP.get(url, headers=get_headers(), timeout=30)
+    resp = HTTP.get(url, headers=get_headers(), timeout=30)
     users = []
     if resp.status_code == 200:
         data = resp.json()
@@ -378,8 +378,7 @@ def build_cell_value(value, is_date=False, is_number=False, font_size=14):
 def read_sheet_range(sheet_id, range_str):
     """读取表格范围数据，返回gridData"""
     url = f"{BASE_URL}/files/{FILE_ID}/{sheet_id}/{range_str}"
-    # 使用独立请求（不共享Session），避免连接池问题
-    resp = requests.get(url, headers=get_headers(), timeout=30, proxies={"http": None, "https": None})
+    resp = HTTP.get(url, headers=get_headers(), timeout=30)
     if resp.status_code == 200:
         data = resp.json()
         return data.get("gridData", {})
@@ -422,7 +421,7 @@ def get_next_empty_row(sheet_id):
 def batch_update(requests_body):
     """执行批量更新操作"""
     url = f"{BASE_URL}/files/{FILE_ID}/batchUpdate"
-    resp = TENCENT_HTTP.post(url, headers=get_headers(), json=requests_body, timeout=30)
+    resp = HTTP.post(url, headers=get_headers(), json=requests_body, timeout=30)
     return resp
 
 
@@ -745,24 +744,8 @@ def clear_user_caches():
     _users_cache["data"] = None
     _users_cache["timestamp"] = 0
 
-def _read_batch(sheet_id, range_str):
-    """读取一批数据，供并行调用"""
-    return read_sheet_range(sheet_id, range_str)
-
-def _read_batch_with_retry(sheet_id, range_str, max_retries=1):
-    """读取一批数据，带重试"""
-    for attempt in range(max_retries + 1):
-        result = read_sheet_range(sheet_id, range_str)
-        rows = result.get("rows", [])
-        if rows or attempt == max_retries:
-            return result
-        time.sleep(0.3)
-    return {}
-
-
 def fetch_all_orders_raw():
-    """从腾讯表格读取所有订单原始数据，带缓存，并行读取加速
-    如果API读取失败且缓存中有数据，返回缓存数据（降级策略）"""
+    """从腾讯表格读取所有订单原始数据，带缓存，并行读取加速"""
     now = datetime.now().timestamp()
     if _orders_cache["data"] is not None and (now - _orders_cache["timestamp"]) < CACHE_TTL:
         return _orders_cache["data"]
@@ -777,7 +760,7 @@ def fetch_all_orders_raw():
         scan_ranges.append((start, end))
 
     with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = {executor.submit(_read_batch_with_retry, SHEET_ID, f"A{s}:A{e}"): (s, e) for s, e in scan_ranges}
+        futures = {executor.submit(read_sheet_range, SHEET_ID, f"A{s}:A{e}"): (s, e) for s, e in scan_ranges}
         for future in as_completed(futures):
             grid_data = future.result()
             rows = grid_data.get("rows", [])
@@ -798,9 +781,6 @@ def fetch_all_orders_raw():
                 break
 
     if last_data_row <= 1:
-        # API可能返回空，如果有缓存数据则使用缓存（降级）
-        if _orders_cache["data"] is not None:
-            return _orders_cache["data"]
         _orders_cache["data"] = []
         _orders_cache["timestamp"] = now
         return []
@@ -815,7 +795,7 @@ def fetch_all_orders_raw():
         data_ranges.append((offset, start, end))
 
     with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = {executor.submit(_read_batch_with_retry, SHEET_ID, f"A{s}:L{e}"): (offset, s, e) for offset, s, e in data_ranges}
+        futures = {executor.submit(read_sheet_range, SHEET_ID, f"A{s}:L{e}"): (offset, s, e) for offset, s, e in data_ranges}
         for future in as_completed(futures):
             grid_data = future.result()
             rows = grid_data.get("rows", [])
@@ -865,10 +845,6 @@ def fetch_all_orders_raw():
                 "submitter_id": row_data[10],
                 "submit_time": row_data[11]
             })
-
-    # 如果解析结果为空但有缓存数据，使用缓存（降级）
-    if not orders and _orders_cache["data"] is not None and len(_orders_cache["data"]) > 0:
-        return _orders_cache["data"]
 
     _orders_cache["data"] = orders
     _orders_cache["timestamp"] = now
@@ -1253,7 +1229,7 @@ def update_password():
 
         # 读取用户表找到对应行
         url = f"{BASE_URL}/files/{USER_FILE_ID}/{USER_SHEET_ID}/A2:C200"
-        resp = TENCENT_HTTP.get(url, headers=get_headers(), timeout=30)
+        resp = HTTP.get(url, headers=get_headers(), timeout=30)
         if resp.status_code != 200:
             return jsonify({"success": False, "error": "读取用户表失败"})
 
@@ -1505,7 +1481,7 @@ def test_connection():
     """测试腾讯表格连接"""
     try:
         url = f"{BASE_URL}/files/{FILE_ID}"
-        resp = TENCENT_HTTP.get(url, headers=get_headers(), timeout=30)
+        resp = HTTP.get(url, headers=get_headers(), timeout=30)
         if resp.status_code == 200:
             data = resp.json()
             sheets = data.get("properties", [])
