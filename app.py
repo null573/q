@@ -746,8 +746,9 @@ def _read_batch(sheet_id, range_str):
 def fetch_all_orders_raw():
     """从腾讯表格读取所有订单原始数据，带缓存，并行读取加速"""
     now = datetime.now().timestamp()
-    # 缓存命中条件：数据非空且在TTL内
-    if _orders_cache["data"] and len(_orders_cache["data"]) > 0 and (now - _orders_cache["timestamp"]) < CACHE_TTL:
+    # 缓存命中条件：数据非空且在TTL内（或没有强制刷新标记）
+    cache_valid = _orders_cache["data"] and len(_orders_cache["data"]) > 0 and (now - _orders_cache["timestamp"]) < CACHE_TTL
+    if cache_valid and not _orders_cache.get("_refresh_flag"):
         return _orders_cache["data"]
 
     # Step 1: 并行扫描A列，找到数据边界（4个线程，每批500行）
@@ -1527,15 +1528,11 @@ def _warmup_keepalive():
                 resp = HTTP.get(url, headers=get_headers(), timeout=10)
                 if resp.status_code == 200:
                     # 元数据读取成功，说明网络通畅，刷新订单缓存
-                    # 先备份当前缓存，如果刷新失败则恢复
-                    old_data = _orders_cache["data"]
-                    old_timestamp = _orders_cache["timestamp"]
-                    _orders_cache["timestamp"] = 0
+                    # 使用临时过期标记，避免影响并发请求
+                    _orders_cache["_refresh_flag"] = True
                     result = fetch_all_orders_raw()
-                    if not result and old_data is not None:
-                        # 刷新失败，恢复旧缓存
-                        _orders_cache["data"] = old_data
-                        _orders_cache["timestamp"] = old_timestamp
+                    del _orders_cache["_refresh_flag"]
+                    if not result and _orders_cache.get("data"):
                         print("[warmup] 刷新失败，保留旧缓存")
             except Exception as e:
                 print(f"[warmup] error: {e}")
