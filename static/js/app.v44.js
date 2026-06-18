@@ -202,13 +202,7 @@ function initApp() {
     tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowStr = tomorrow.toISOString().split('T')[0];
     document.getElementById('expectedDate').value = tomorrowStr;
-    document.getElementById('queueDate').value = '';
-    // queueDate 初始为禁用，等 calculatedDate 计算完成后才可编辑
-    const queueDateInput = document.getElementById('queueDate');
-    queueDateInput.disabled = true;
-    queueDateInput.placeholder = '请先选择型号和吨位计算可发货日期';
-    queueDateInput.style.cursor = 'not-allowed';
-    queueDateInput.style.background = '#e9ecef';
+    document.getElementById('queueDate').value = tomorrowStr;
     // 绑定事件监听器
     setupEventListeners();
     setupEditQueueDateListener();
@@ -528,19 +522,14 @@ async function calculateDate() {
             } else if (isDate) {
                 queueDateInput.style.display = '';
                 queueDateInput.disabled = false;
-                queueDateInput.style.background = '#fff';
+                queueDateInput.style.background = '';
                 queueDateInput.style.color = '';
-                queueDateInput.style.cursor = 'pointer';
-                queueDateInput.placeholder = '点击选择日期';
                 queueDateInput.value = calcDate;
                 const oldHint = queueDateInput.parentNode.querySelector('.queue-date-hint');
                 if (oldHint) oldHint.remove();
             } else {
                 queueDateInput.style.display = '';
                 queueDateInput.disabled = false;
-                queueDateInput.style.background = '#fff';
-                queueDateInput.style.cursor = 'pointer';
-                queueDateInput.placeholder = '点击选择日期';
                 const oldHint = queueDateInput.parentNode.querySelector('.queue-date-hint');
                 if (oldHint) oldHint.remove();
             }
@@ -630,11 +619,7 @@ async function handleCreateOrder(e) {
             tomorrow.setDate(tomorrow.getDate() + 1);
             const tomorrowStr = tomorrow.toISOString().split('T')[0];
             document.getElementById('expectedDate').value = tomorrowStr;
-            document.getElementById('queueDate').value = '';
-            document.getElementById('queueDate').disabled = true;
-            document.getElementById('queueDate').placeholder = '请先选择型号和吨位计算可发货日期';
-            document.getElementById('queueDate').style.cursor = 'not-allowed';
-            document.getElementById('queueDate').style.background = '#e9ecef';
+            document.getElementById('queueDate').value = tomorrowStr;
             document.getElementById('calculatedDate').value = '';
             pendingRowIndex = 0; // 清空
             draftQueue = null; // 清除草稿
@@ -1543,77 +1528,5 @@ async function adminHealthCheck() {
         bar.style.display = '';
     } catch (e) {
         bar.style.display = 'none';
-    }
-}
-
-// ==================== 计算公式管理 ====================
-
-async function loadFormulas() {
-    const log = document.getElementById('formulaLog');
-    const list = document.getElementById('formulaList');
-    try {
-        log.innerHTML = '加载中...';
-        const resp = await fetch(`/api/admin/formulas?submitter_id=${currentUser.id}`);
-        const data = await resp.json();
-        if (data.success) {
-            const formulas = data.formulas || {};
-            if (Object.keys(formulas).length === 0) {
-                list.innerHTML = '<p style="color:#999;padding:8px;">暂无公式配置</p>';
-                log.innerHTML = '当前无公式，请在上方输入框中添加。';
-            } else {
-                const lines = Object.entries(formulas).map(([k, v]) => `<div style="padding:6px 10px;background:#f8f9fa;border-radius:6px;margin-bottom:4px;font-family:monospace;"><strong>${k}</strong> = ${v}</div>`).join('');
-                list.innerHTML = lines;
-                // 填充到输入框
-                const text = Object.entries(formulas).map(([k, v]) => `${k}=${v}`).join('\n');
-                document.getElementById('formulaInput').value = text;
-                log.innerHTML = `已加载 ${Object.keys(formulas).length} 条公式`;
-            }
-        } else {
-            log.innerHTML = '<span style="color:#e74c3c;">加载失败: ' + (data.error || '') + '</span>';
-        }
-    } catch (e) {
-        log.innerHTML = '<span style="color:#e74c3c;">网络错误</span>';
-    }
-}
-
-async function submitFormulas() {
-    const log = document.getElementById('formulaLog');
-    const text = document.getElementById('formulaInput').value.trim();
-    if (!text) {
-        log.innerHTML = '<span style="color:#e74c3c;">请输入至少一条公式</span>';
-        return;
-    }
-    const formulas = {};
-    const lines = text.split('\n').filter(l => l.trim());
-    for (const line of lines) {
-        const eqIdx = line.indexOf('=');
-        if (eqIdx <= 0) {
-            log.innerHTML = `<span style="color:#e74c3c;">格式错误: "${line}"，应为 型号=公式</span>`;
-            return;
-        }
-        const model = line.substring(0, eqIdx).trim();
-        const formula = line.substring(eqIdx + 1).trim();
-        if (!model || !formula) {
-            log.innerHTML = `<span style="color:#e74c3c;">格式错误: "${line}"</span>`;
-            return;
-        }
-        formulas[model] = formula;
-    }
-    try {
-        log.innerHTML = '保存中...';
-        const resp = await fetch(`/api/admin/formulas?submitter_id=${currentUser.id}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ formulas })
-        });
-        const data = await resp.json();
-        if (data.success) {
-            log.innerHTML = `<span style="color:#27ae60;">${data.message}，已提交。我将把公式集成到计算引擎代码中。</span>`;
-            loadFormulas();
-        } else {
-            log.innerHTML = '<span style="color:#e74c3c;">保存失败: ' + (data.error || '') + '</span>';
-        }
-    } catch (e) {
-        log.innerHTML = '<span style="color:#e74c3c;">网络错误</span>';
     }
 }

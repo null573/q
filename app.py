@@ -1524,5 +1524,52 @@ def _warmup_keepalive():
 
 _warmup_keepalive()
 
+# ==================== 计算公式管理 API ====================
+
+FORMULA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'formulas.json')
+
+def _load_formulas():
+    """加载公式配置"""
+    try:
+        if os.path.exists(FORMULA_FILE):
+            with open(FORMULA_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except:
+        pass
+    return {}
+
+def _save_formulas(formulas):
+    """保存公式配置"""
+    with open(FORMULA_FILE, 'w', encoding='utf-8') as f:
+        json.dump(formulas, f, ensure_ascii=False, indent=2)
+
+@app.route('/api/admin/formulas', methods=['GET'])
+@require_auth
+def get_formulas():
+    """获取当前公式配置"""
+    try:
+        current_user_id = request.args.get('submitter_id', '')
+        if current_user_id != ADMIN_EMPLOYEE_ID:
+            return jsonify({"success": False, "error": "无权限"})
+        formulas = _load_formulas()
+        return jsonify({"success": True, "formulas": formulas})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route('/api/admin/formulas', methods=['POST'])
+@require_auth
+def save_formulas():
+    """保存公式配置"""
+    try:
+        current_user_id = request.args.get('submitter_id', '')
+        if current_user_id != ADMIN_EMPLOYEE_ID:
+            return jsonify({"success": False, "error": "无权限"})
+        data = request.json
+        formulas = data.get('formulas', {})
+        _save_formulas(formulas)
+        return jsonify({"success": True, "message": f"已保存 {len(formulas)} 条公式"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

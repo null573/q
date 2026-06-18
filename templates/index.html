@@ -7,11 +7,11 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>销售排队系统</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.v43.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.v44.css') }}">
     <script>
         // 版本检查：如果服务器版本更新，自动刷新页面
         (function(){
-            var serverVersion = 43;
+            var serverVersion = 44;
             var localVersion = parseInt(localStorage.getItem('app_version') || '0');
             if (localVersion && localVersion < serverVersion) {
                 localStorage.setItem('app_version', serverVersion);
@@ -92,7 +92,7 @@
 
                 <div class="form-group">
                     <label for="queueDate">输入发货日期排队 <span class="required">*</span></label>
-                    <input type="text" id="queueDate" name="queueDate" required readonly placeholder="点击选择日期" onclick="showDatePicker(this)" style="cursor:pointer;background:#fff;">
+                    <input type="text" id="queueDate" name="queueDate" required readonly disabled placeholder="请先选择型号和吨位计算可发货日期" onclick="showDatePicker(this)" style="cursor:not-allowed;background:#e9ecef;">
                 </div>
 
                 <div class="form-actions">
@@ -148,6 +148,18 @@
                 <p class="admin-desc">仅李刚可见。主服务管理腾讯、Render、GitHub 三项凭证，保存到 Render 环境变量；输入框不回显，日志只显示前 4 位 + 后 4 位，保存后会触发重新部署。</p>
                 <div id="adminItems" class="admin-items"></div>
                 <div id="adminLog" class="admin-log"></div>
+            </div>
+
+            <div class="admin-card" style="margin-top:16px;">
+                <h2 class="admin-title">可发货日期计算公式</h2>
+                <p class="admin-desc">添加或修改型号的可发货日期计算公式。格式：每行一条，<code>型号=公式</code>。公式中可用变量：<code>{吨位}</code>、<code>{期望日期}</code>。示例：<code>C220={期望日期}+{吨位}*0.5天</code></p>
+                <textarea id="formulaInput" rows="8" placeholder="C220={期望日期}+{吨位}*0.5天&#10;330N={期望日期}+15天&#10;F3500={期望日期}+{吨位}*1天" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;font-size:14px;font-family:monospace;resize:vertical;box-sizing:border-box;"></textarea>
+                <div style="margin-top:10px;display:flex;gap:10px;">
+                    <button onclick="submitFormulas()" class="btn-submit" style="padding:10px 24px;">提交公式</button>
+                    <button onclick="loadFormulas()" class="btn-reset" style="padding:10px 24px;">加载现有公式</button>
+                </div>
+                <div id="formulaLog" class="admin-log" style="margin-top:10px;"></div>
+                <div id="formulaList" style="margin-top:10px;max-height:300px;overflow-y:auto;"></div>
             </div>
         </div>
     </div>
@@ -230,6 +242,6 @@
 
     <div id="toast" class="toast"></div>
 
-    <script src="{{ url_for('static', filename='js/app.v43.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app.v44.js') }}"></script>
 </body>
 </html>
