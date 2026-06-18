@@ -945,9 +945,8 @@ def get_filtered_orders(submitter_id, current_user, view_mode, submitter_name=""
     cache_key = f"{access_level}:{view_mode}:{normalize_user_key(submitter_id)}:{submitter_name}:{(current_user or {}).get('department', '')}"
 
     # 检查过滤缓存是否有效（基于原始数据的时间戳）
-    if (not is_mine_view and
-        _filtered_cache.get(cache_key) is not None and
-        _filtered_cache["timestamp"] == _orders_cache["timestamp"] and
+    if (_filtered_cache.get(cache_key) is not None and
+        _filtered_cache.get("timestamp", 0) == _orders_cache.get("timestamp", 0) and
         (now - _orders_cache["timestamp"]) < CACHE_TTL):
         return _filtered_cache[cache_key]
 
@@ -982,10 +981,10 @@ def get_filtered_orders(submitter_id, current_user, view_mode, submitter_name=""
         return (1, "")
     orders.sort(key=sort_key)
 
-    # 只缓存全部排队；我的排队不缓存，避免已有订单因旧缓存消失
-    if not is_mine_view:
-        _filtered_cache[cache_key] = orders
-        _filtered_cache["timestamp"] = _orders_cache["timestamp"]
+    # 缓存过滤结果（包括我的排队和全部排队）
+    _filtered_cache[cache_key] = orders
+    _filtered_cache["timestamp"] = _orders_cache["timestamp"]
+
     return orders
 
 
