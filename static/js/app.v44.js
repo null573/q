@@ -34,7 +34,10 @@ function getBeijingTomorrow() {
     const utc = now.getTime() + now.getTimezoneOffset() * 60000;
     const beijing = new Date(utc + 8 * 3600000);
     beijing.setDate(beijing.getDate() + 1);
-    return beijing.toISOString().split('T')[0];
+    const y = beijing.getFullYear();
+    const m = String(beijing.getMonth() + 1).padStart(2, '0');
+    const d = String(beijing.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
 }
 
 // 从localStorage读取密码、员工ID和用户名

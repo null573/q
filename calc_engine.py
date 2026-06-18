@@ -221,6 +221,9 @@ def _load_model_configs_from_sheet():
             continue
         try:
             sheet_id = cells[1].strip()
+            # 兼容用户填数字格式（如 4 → 000004）
+            if sheet_id.isdigit() and len(sheet_id) < 6:
+                sheet_id = sheet_id.zfill(6)
             start_row = int(cells[2])
             capacity_col = cells[3].strip()
             limit_cell = cells[4].strip()
