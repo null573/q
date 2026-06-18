@@ -4,6 +4,8 @@
 """
 
 from datetime import datetime, timedelta
+import json
+import os
 import requests
 
 BASE_URL = "https://docs.qq.com/openapi/spreadsheet/v3"
@@ -182,6 +184,27 @@ def get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count):
     return result
 
 
+def _load_user_model_configs():
+    """加载用户通过管理员页面添加的型号配置"""
+    try:
+        config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'model_configs.json')
+        if os.path.exists(config_file):
+            with open(config_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except:
+        pass
+    return {}
+
+def _get_model_config(model):
+    """获取型号配置：先查硬编码，再查用户添加"""
+    if model in MODEL_CONFIG:
+        return MODEL_CONFIG[model]
+    user_configs = _load_user_model_configs()
+    if model in user_configs:
+        cfg = user_configs[model]
+        return (cfg[0], cfg[1], cfg[2], cfg[3], cfg[4])
+    return None
+
 def calculate_delivery_date(model, tonnage_str, expected_date_str):
     """
     计算可发货日期
@@ -196,8 +219,9 @@ def calculate_delivery_date(model, tonnage_str, expected_date_str):
         calculated_date_str: 计算出的可发货日期，或"请联系商务支持"
         message: 错误信息（如果有）
     """
-    # 1. 检查型号是否在配置中
-    if model not in MODEL_CONFIG:
+    # 1. 检查型号是否在配置中（硬编码 + 用户添加）
+    config = _get_model_config(model)
+    if not config:
         return "请联系商务支持", f"型号 {model} 暂无排产数据"
 
     # 2. 解析吨位
@@ -211,7 +235,7 @@ def calculate_delivery_date(model, tonnage_str, expected_date_str):
         return "", "期望发货日期不能为空"
 
     # 4. 获取工作表配置
-    sheet_id, start_row, capacity_col, limit_cell, row_count = MODEL_CONFIG[model]
+    sheet_id, start_row, capacity_col, limit_cell, row_count = config
 
     # 5. 读取工作表数据（优化后：1次API调用）
     sheet_data = get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count)
