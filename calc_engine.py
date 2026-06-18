@@ -185,25 +185,62 @@ def get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count):
     return result
 
 
-def _load_user_model_configs():
-    """加载用户通过管理员页面添加的型号配置"""
-    try:
-        config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'model_configs.json')
-        if os.path.exists(config_file):
-            with open(config_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
-    except:
-        pass
-    return {}
+# 配置表缓存：从腾讯表格配置表读取的型号配置
+_model_config_cache = {}
+_model_config_cache_time = 0
+MODEL_CONFIG_CACHE_TTL = 60  # 60秒缓存
+
+
+def _load_model_configs_from_sheet():
+    """从腾讯表格配置表读取型号配置（带60秒缓存）"""
+    import time
+    global _model_config_cache, _model_config_cache_time
+
+    now = time.time()
+    if _model_config_cache and (now - _model_config_cache_time < MODEL_CONFIG_CACHE_TTL):
+        return _model_config_cache
+
+    config_sheet_id = "dc53jt"
+    # 读取配置表：A列=型号, B列=Sheet ID, C列=起始行, D列=产能列, E列=上限日期单元格, F列=行数
+    # 标题在第1行，数据从第2行开始，读取足够多的行
+    grid_data = read_sheet_range(config_sheet_id, "A2:F200")
+    rows = grid_data.get("rows", [])
+
+    configs = {}
+    for row in rows:
+        values = row.get("values", [])
+        if len(values) < 6:
+            continue
+        cells = []
+        for v in values[:6]:
+            cv = v.get("cellValue")
+            cells.append(parse_cell_value(cv) if cv else "")
+
+        model_name = cells[0].strip()
+        if not model_name:
+            continue
+        try:
+            sheet_id = cells[1].strip()
+            start_row = int(cells[2])
+            capacity_col = cells[3].strip()
+            limit_cell = cells[4].strip()
+            row_count = int(cells[5])
+            configs[model_name] = (sheet_id, start_row, capacity_col, limit_cell, row_count)
+        except (ValueError, IndexError):
+            continue
+
+    _model_config_cache = configs
+    _model_config_cache_time = now
+    return configs
+
 
 def _get_model_config(model):
-    """获取型号配置：先查硬编码，再查用户添加"""
+    """获取型号配置：先查硬编码，再查腾讯表格配置表"""
     if model in MODEL_CONFIG:
         return MODEL_CONFIG[model]
-    user_configs = _load_user_model_configs()
-    if model in user_configs:
-        cfg = user_configs[model]
-        return (cfg[0], cfg[1], cfg[2], cfg[3], cfg[4])
+    sheet_configs = _load_model_configs_from_sheet()
+    if model in sheet_configs:
+        return sheet_configs[model]
     return None
 
 def calculate_delivery_date(model, tonnage_str, expected_date_str):

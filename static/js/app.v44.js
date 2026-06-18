@@ -26,6 +26,15 @@ const ADMIN_KEY_LABELS = {
     GITHUB_TOKEN: 'GitHub Token'
 };
 
+// 计算北京时间次日日期字符串（YYYY-MM-DD）
+function getBeijingTomorrow() {
+    const now = new Date();
+    const utc = now.getTime() + now.getTimezoneOffset() * 60000;
+    const beijing = new Date(utc + 8 * 3600000);
+    beijing.setDate(beijing.getDate() + 1);
+    return beijing.toISOString().split('T')[0];
+}
+
 // 从localStorage读取密码、员工ID和用户名
 let accessPassword = localStorage.getItem('accessPassword') || '';
 let employeeId = localStorage.getItem('employeeId') || '';
@@ -111,62 +120,58 @@ function hideAuthOverlay() {
 }
 
 async function loadAuthUsers() {
-    const select = document.getElementById('authUserSelect');
-    select.innerHTML = '<option value="">请选择员工</option>';
-    select.disabled = true;
-    document.getElementById('authError').textContent = '正在加载员工列表...';
-
+    // 员工号输入模式下，不需要加载下拉列表
+    // 仅预取用户列表用于后续验证
     try {
-        const response = await fetch(`${API_BASE}/auth/users`);
-        const data = await response.json();
-        if (data.success && Array.isArray(data.users) && data.users.length > 0) {
-            select.disabled = false;
-            document.getElementById('authError').textContent = '';
-            data.users.forEach(user => {
-                const option = document.createElement('option');
-                option.value = user.employee_id;
-                option.textContent = user.name;
-                select.appendChild(option);
-            });
-        } else {
-            select.innerHTML = '<option value="">员工列表加载失败</option>';
-            document.getElementById('authError').textContent = data.error || '员工列表为空';
-        }
+        await fetch(`${API_BASE}/auth/users`);
     } catch (error) {
-        console.error('加载用户列表失败', error);
-        select.innerHTML = '<option value="">员工列表加载失败</option>';
-        document.getElementById('authError').textContent = '加载员工列表失败，请稍后重试';
+        console.error('预取用户列表失败', error);
     }
 }
 
 async function doAuth() {
-    const selectedEmployeeId = document.getElementById('authUserSelect').value;
+    const inputEmployeeId = document.getElementById('authUserInput').value.trim();
     const password = document.getElementById('authPassword').value.trim();
-    if (!selectedEmployeeId) {
-        document.getElementById('authError').textContent = '请选择员工';
+    if (!inputEmployeeId) {
+        document.getElementById('authError').textContent = '请输入员工号';
         return;
     }
     if (!password) {
         document.getElementById('authError').textContent = '请输入密码';
         return;
     }
+    // 先验证员工号是否存在
+    try {
+        const usersResp = await fetch(`${API_BASE}/auth/users`);
+        const usersData = await usersResp.json();
+        if (usersData.success && Array.isArray(usersData.users)) {
+            const found = usersData.users.some(u => String(u.employee_id) === inputEmployeeId);
+            if (!found) {
+                document.getElementById('authError').textContent = '员工号不存在';
+                return;
+            }
+        }
+    } catch (error) {
+        // 验证失败不阻断，继续尝试登录
+        console.error('验证员工号失败', error);
+    }
     try {
         const response = await fetch(`${API_BASE}/auth/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ employee_id: selectedEmployeeId, password })
+            body: JSON.stringify({ employee_id: inputEmployeeId, password })
         });
         const data = await response.json();
         if (data.success) {
-            console.log('[doAuth] selectedEmployeeId=', selectedEmployeeId, 'before: employeeId=', employeeId, 'currentUser.id=', currentUser.id);
+            console.log('[doAuth] inputEmployeeId=', inputEmployeeId, 'before: employeeId=', employeeId, 'currentUser.id=', currentUser.id);
             accessPassword = data.access_password || '';
-            employeeId = selectedEmployeeId;
+            employeeId = inputEmployeeId;
             const name = data.user?.name || '用户';
             localStorage.setItem('accessPassword', accessPassword);
-            localStorage.setItem('employeeId', selectedEmployeeId);
+            localStorage.setItem('employeeId', inputEmployeeId);
             localStorage.setItem('userName', name);
             currentUser.name = name;
-            currentUser.id = selectedEmployeeId;
+            currentUser.id = inputEmployeeId;
             console.log('[doAuth] after: employeeId=', employeeId, 'currentUser.id=', currentUser.id);
             hideAuthOverlay();
             initApp();
@@ -197,11 +202,8 @@ function initApp() {
     document.getElementById('customer').value = '';
     document.getElementById('calculatedDate').value = '';
     pendingRowIndex = 0;
-    // 期望发货日期默认为次日
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowStr = tomorrow.toISOString().split('T')[0];
-    document.getElementById('expectedDate').value = tomorrowStr;
+    // 期望发货日期默认为次日（北京时间）
+    document.getElementById('expectedDate').value = getBeijingTomorrow();
     document.getElementById('queueDate').value = '';
     // queueDate 初始为禁用，等 calculatedDate 计算完成后才可编辑
     const queueDateInput = document.getElementById('queueDate');
@@ -625,11 +627,8 @@ async function handleCreateOrder(e) {
             document.getElementById('model').value = '';
             const mi = document.getElementById('modelInput');
             if (mi) mi.value = '';
-            // 重置为次日
-            const tomorrow = new Date();
-            tomorrow.setDate(tomorrow.getDate() + 1);
-            const tomorrowStr = tomorrow.toISOString().split('T')[0];
-            document.getElementById('expectedDate').value = tomorrowStr;
+            // 重置为次日（北京时间）
+            document.getElementById('expectedDate').value = getBeijingTomorrow();
             document.getElementById('queueDate').value = '';
             document.getElementById('queueDate').disabled = true;
             document.getElementById('queueDate').placeholder = '请先选择型号和吨位计算可发货日期';
@@ -794,7 +793,7 @@ function renderOrders(orders) {
             <tr>
                 <th>型号</th>
                 <th>吨位</th>
-                <th>客户</th>
+                ${(!isAdmin && viewMode === 'all') ? '' : '<th>客户</th>'}
                 <th>排队日期</th>
                 <th>操作</th>
             </tr>
@@ -812,7 +811,7 @@ function renderOrders(orders) {
         html += `<tr>
             <td class="td-model">${escapeHtml(order.model)}</td>
             <td>${escapeHtml(order.tonnage)}</td>
-            <td>${escapeHtml(order.customer)}</td>
+            ${(!isAdmin && viewMode === 'all') ? '' : '<td>' + escapeHtml(order.customer) + '</td>'}
             <td>${queueDateDisplay}</td>
             <td class="td-actions">
                 <button class="btn-edit" onclick="openEditModal(${order.row_index})">改</button>
@@ -1546,71 +1545,4 @@ async function adminHealthCheck() {
     }
 }
 
-// ==================== 型号产能配置管理 ====================
 
-async function loadModelConfigs() {
-    const log = document.getElementById('modelConfigLog');
-    const list = document.getElementById('modelConfigList');
-    try {
-        log.innerHTML = '加载中...';
-        const resp = await apiFetch(`/api/admin/model-configs?submitter_id=${currentUser.id}`);
-        const data = await resp.json();
-        if (data.success) {
-            const configs = data.configs || {};
-            const keys = Object.keys(configs);
-            if (keys.length === 0) {
-                list.innerHTML = '<p style="color:#999;padding:8px;">暂无配置</p>';
-                log.innerHTML = '当前无型号配置。';
-            } else {
-                const rows = keys.map(k => {
-                    const c = configs[k];
-                    const color = c.source === '内置' ? '#666' : '#27ae60';
-                    return `<div style="padding:6px 10px;background:#f8f9fa;border-radius:6px;margin-bottom:4px;font-size:13px;">
-                        <strong>${k}</strong> <span style="color:${color};font-size:11px;">[${c.source}]</span><br>
-                        Sheet: ${c.sheet_id} | 起始行: ${c.start_row} | 产能列: ${c.capacity_col} | 上限: ${c.limit_cell} | 行数: ${c.row_count}
-                    </div>`;
-                }).join('');
-                list.innerHTML = rows;
-                log.innerHTML = `已加载 ${keys.length} 条配置`;
-            }
-        } else {
-            log.innerHTML = '<span style="color:#e74c3c;">加载失败: ' + (data.error || '') + '</span>';
-        }
-    } catch (e) {
-        log.innerHTML = '<span style="color:#e74c3c;">网络错误</span>';
-    }
-}
-
-async function submitModelConfig() {
-    const log = document.getElementById('modelConfigLog');
-    const model = document.getElementById('cfgModel').value.trim();
-    const sheet_id = document.getElementById('cfgSheetId').value.trim();
-    const start_row = document.getElementById('cfgStartRow').value.trim();
-    const capacity_col = document.getElementById('cfgCapCol').value.trim();
-    const limit_cell = document.getElementById('cfgLimitCell').value.trim();
-    const row_count = document.getElementById('cfgRowCount').value.trim();
-
-    if (!model || !sheet_id || !start_row || !capacity_col || !limit_cell || !row_count) {
-        log.innerHTML = '<span style="color:#e74c3c;">所有字段都必须填写</span>';
-        return;
-    }
-    try {
-        log.innerHTML = '保存中...';
-        const resp = await apiFetch(`/api/admin/model-configs?submitter_id=${currentUser.id}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model, sheet_id, start_row, capacity_col, limit_cell, row_count })
-        });
-        const data = await resp.json();
-        if (data.success) {
-            log.innerHTML = `<span style="color:#27ae60;">${data.message}。请通知我将此配置集成到计算引擎代码中。</span>`;
-            loadModelConfigs();
-            // 清空输入框
-            ['cfgModel','cfgSheetId','cfgStartRow','cfgCapCol','cfgLimitCell','cfgRowCount'].forEach(id => document.getElementById(id).value = '');
-        } else {
-            log.innerHTML = '<span style="color:#e74c3c;">保存失败: ' + (data.error || '') + '</span>';
-        }
-    } catch (e) {
-        log.innerHTML = '<span style="color:#e74c3c;">网络错误</span>';
-    }
-}
