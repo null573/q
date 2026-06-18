@@ -746,7 +746,8 @@ def _read_batch(sheet_id, range_str):
 def fetch_all_orders_raw():
     """从腾讯表格读取所有订单原始数据，带缓存，并行读取加速"""
     now = datetime.now().timestamp()
-    if _orders_cache["data"] is not None and (now - _orders_cache["timestamp"]) < CACHE_TTL:
+    # 缓存命中条件：数据非空且在TTL内
+    if _orders_cache["data"] and len(_orders_cache["data"]) > 0 and (now - _orders_cache["timestamp"]) < CACHE_TTL:
         return _orders_cache["data"]
 
     # Step 1: 并行扫描A列，找到数据边界（4个线程，每批500行）
@@ -780,11 +781,10 @@ def fetch_all_orders_raw():
                 break
 
     if last_data_row <= 1:
-        # API读取失败时，如果有缓存数据则返回缓存（避免显示空）
-        if _orders_cache["data"] is not None and len(_orders_cache["data"]) > 0:
+        # API读取失败时，如果有有效缓存则返回缓存（避免显示空）
+        if _orders_cache["data"] and len(_orders_cache["data"]) > 0:
             return _orders_cache["data"]
-        _orders_cache["data"] = []
-        _orders_cache["timestamp"] = now
+        # 不缓存空结果，避免空数组污染缓存
         return []
 
     # Step 2: 并行读取有数据的范围（A2:Llast_data_row），每批200行
