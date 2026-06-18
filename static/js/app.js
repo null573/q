@@ -1,5 +1,7 @@
 let currentUser = { name: '用户', id: '' };
 let allOrders = [];
+let cachedMineOrders = [];  // 我的排队缓存
+let cachedAllOrders = [];   // 全部排队缓存
 let modelOptions = [];
 let pendingRowIndex = 0;
 let currentPage = 1;
@@ -659,9 +661,17 @@ async function loadOrders(page = 1, forceRefresh = false, options = {}) {
         if (requestSeq !== ordersRequestSeq) return;
         if (data.success) {
             const newOrders = (data.orders || []).filter(order => !isRecentlyDeletedOrder(order));
-            // 如果API返回空但之前有数据，始终保留旧数据（降级显示）
-            if (newOrders.length === 0 && allOrders.length > 0) {
-                console.warn('[loadOrders] API返回空，保留旧数据');
+            // 保存到对应viewMode的缓存
+            if (viewMode === 'mine') {
+                cachedMineOrders = newOrders;
+            } else {
+                cachedAllOrders = newOrders;
+            }
+            // 如果API返回空但对应缓存有数据，使用对应缓存（降级显示）
+            const cachedOrders = viewMode === 'mine' ? cachedMineOrders : cachedAllOrders;
+            if (newOrders.length === 0 && cachedOrders.length > 0) {
+                console.warn('[loadOrders] API返回空，使用' + viewMode + '缓存数据');
+                allOrders = cachedOrders;
                 renderOrders(allOrders);
                 return;
             }
@@ -677,8 +687,10 @@ async function loadOrders(page = 1, forceRefresh = false, options = {}) {
             ordersDirty = false;
         } else {
             if (silent) return;
-            // 请求失败时，如果有旧数据则显示旧数据
-            if (allOrders.length > 0) {
+            // 请求失败时，使用对应viewMode的缓存
+            const cachedOrders = viewMode === 'mine' ? cachedMineOrders : cachedAllOrders;
+            if (cachedOrders.length > 0) {
+                allOrders = cachedOrders;
                 renderOrders(allOrders);
                 showToast('数据加载失败，显示的是缓存数据', 'warning');
                 return;
@@ -688,8 +700,10 @@ async function loadOrders(page = 1, forceRefresh = false, options = {}) {
     } catch (error) {
         if (requestSeq !== ordersRequestSeq || silent) return;
         console.error('[loadOrders] error:', error);
-        // 网络错误时，如果有旧数据则显示旧数据
-        if (allOrders.length > 0) {
+        // 网络错误时，使用对应viewMode的缓存
+        const cachedOrders = viewMode === 'mine' ? cachedMineOrders : cachedAllOrders;
+        if (cachedOrders.length > 0) {
+            allOrders = cachedOrders;
             renderOrders(allOrders);
             showToast('网络错误，显示的是缓存数据', 'warning');
             return;
