@@ -31,6 +31,9 @@ OPEN_ID = os.environ.get('OPEN_ID', '9bc172e5338147d8a35c1438ea8d1577')
 
 BASE_URL = "https://docs.qq.com/openapi/spreadsheet/v3"
 HTTP = requests.Session()
+adapter = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=20, max_retries=2)
+HTTP.mount('https://', adapter)
+HTTP.mount('http://', adapter)
 
 # 访问密码
 ACCESS_PASSWORD = os.environ.get('ACCESS_PASSWORD', 'queue2025')
@@ -374,10 +377,12 @@ def read_sheet_range(sheet_id, range_str):
 
 
 def get_next_empty_row(sheet_id):
-    """获取表格下一个空行号（1-based），从A列第一个空行开始扫描（跳过表头第1行）"""
-    # 分批读取，每批200行，扫描到2000行
+    """获取表格下一个空行号（1-based），从A列第一个空行开始扫描（跳过表头第1行）
+    使用缓存：从上次找到的空行号开始向后搜索，避免每次从第2行扫起"""
+    cached_row = _last_empty_row_cache.get("row", 0)
+    start_search = max(2, cached_row)  # 至少从第2行开始
     batch_size = 200
-    for offset in range(0, 2000, batch_size):
+    for offset in range(start_search - 1, 2000, batch_size):
         start = offset + 1  # 1-based
         end = offset + batch_size
         range_str = f"A{start}:A{end}"
@@ -398,6 +403,7 @@ def get_next_empty_row(sheet_id):
                         has_data = True
                         break
             if not has_data:
+                _last_empty_row_cache["row"] = actual_row
                 return actual_row
 
     return 2001  # 如果前2000行都满了
@@ -527,6 +533,7 @@ _CALC_CACHE_TTL = 30  # 30秒缓存
 # 待处理行缓存
 _pending_row_cache = {"data": None, "timestamp": 0}
 _PENDING_ROW_CACHE_TTL = 30
+_last_empty_row_cache = {"row": 0}  # 缓存上次找到的空行号
 
 def _get_pending_rows():
     """获取所有待处理行（F列为空的行），带缓存"""
@@ -537,7 +544,11 @@ def _get_pending_rows():
 
     pending = {}  # model -> row_index
     batch_size = 200
-    for offset in range(0, 2000, batch_size):
+
+    # 先扫描前500行（大多数情况下数据在前500行）
+    initial_scan_limit = 500
+    found_pending_in_initial = False
+    for offset in range(0, initial_scan_limit, batch_size):
         start = offset + 1
         end = offset + batch_size
         range_str = f"A{start}:F{end}"
@@ -556,9 +567,34 @@ def _get_pending_rows():
             if a_val and not f_val.strip():
                 # 如果同一型号有多行待处理，取最后一行
                 pending[a_val] = actual_row
+                found_pending_in_initial = True
 
         if len(rows) < batch_size:
             break
+
+    # 如果前500行没有待处理行，扩展扫描到2000行
+    if not found_pending_in_initial:
+        for offset in range(initial_scan_limit, 2000, batch_size):
+            start = offset + 1
+            end = offset + batch_size
+            range_str = f"A{start}:F{end}"
+            grid_data = read_sheet_range(SHEET_ID, range_str)
+            rows = grid_data.get("rows", [])
+
+            for i in range(len(rows)):
+                row = rows[i]
+                actual_row = start + i
+                if actual_row < 3:
+                    continue
+                values = row.get("values", [])
+                row_data = [parse_cell_value(v.get("cellValue")) for v in values]
+                a_val = row_data[0] if len(row_data) > 0 else ""
+                f_val = row_data[5] if len(row_data) > 5 else ""
+                if a_val and not f_val.strip():
+                    pending[a_val] = actual_row
+
+            if len(rows) < batch_size:
+                break
 
     _pending_row_cache["data"] = pending
     _pending_row_cache["timestamp"] = now
@@ -691,6 +727,7 @@ def clear_order_caches():
     _filtered_cache["timestamp"] = 0
     _pending_row_cache["data"] = None
     _pending_row_cache["timestamp"] = 0
+    _last_empty_row_cache["row"] = 0
 
 
 def clear_user_caches():
@@ -723,6 +760,7 @@ def fetch_all_orders_raw():
             grid_data = future.result()
             rows = grid_data.get("rows", [])
             start, end = futures[future]
+            batch_has_data = False
             for i, row in enumerate(rows):
                 actual_row = start + i
                 values = row.get("values", [])
@@ -732,6 +770,10 @@ def fetch_all_orders_raw():
                         text = parse_cell_value(cv)
                         if text.strip():
                             last_data_row = max(last_data_row, actual_row)
+                            batch_has_data = True
+            # 如果该批次全部为空，后续批次也必然为空，提前停止
+            if not batch_has_data:
+                break
 
     if last_data_row <= 1:
         _orders_cache["data"] = []

@@ -434,19 +434,19 @@ function setupEventListeners() {
     calcFields.forEach(fieldId => {
         const field = document.getElementById(fieldId);
         if (field) {
-            field.addEventListener('change', debounce(calculateDate, 500));
+            field.addEventListener('change', debounce(calculateDate, 300));
         }
     });
     const calcModelInput = document.getElementById('modelInput');
     if (calcModelInput) {
-        calcModelInput.addEventListener('change', debounce(calculateDate, 500));
+        calcModelInput.addEventListener('change', debounce(calculateDate, 300));
     }
     // 修改页面自动计算
     const editCalcFields = ['editModel', 'editTonnage', 'editCustomer', 'editExpectedDate'];
     editCalcFields.forEach(fieldId => {
         const field = document.getElementById(fieldId);
         if (field) {
-            field.addEventListener('change', debounce(calculateDateForEdit, 500));
+            field.addEventListener('change', debounce(calculateDateForEdit, 300));
         }
     });
 }
@@ -829,11 +829,15 @@ function renderPagination() {
     paginationEl.innerHTML = html;
 }
 
+const _escapeHtmlCache = new Map();
 function escapeHtml(text) {
     if (!text) return '';
+    if (_escapeHtmlCache.has(text)) return _escapeHtmlCache.get(text);
     const div = document.createElement('div');
     div.textContent = text;
-    return div.innerHTML;
+    const result = div.innerHTML;
+    _escapeHtmlCache.set(text, result);
+    return result;
 }
 
 function filterOrders() {
@@ -910,12 +914,9 @@ async function copyOrder(rowIndex) {
         document.getElementById('calculatedDate').value = '';
         document.getElementById('queueDate').value = '';
 
-        ['model', 'tonnage', 'customer', 'expectedDate'].forEach(fieldId => {
-            document.getElementById(fieldId).dispatchEvent(new Event('change', { bubbles: true }));
-        });
+        calculateDate();
 
         showToast('已复制订单内容，请确认后提交新排队', 'success');
-        setTimeout(() => calculateDate(), 0);
     } catch (error) {
         showToast('网络错误，复制失败', 'error');
     }
@@ -1246,7 +1247,6 @@ async function deleteOrder(rowIndex) {
             populateFilterModelSelect();
             ordersDirty = true;
             loadOrders(currentPage, true);
-            setTimeout(() => loadOrders(currentPage, true), 1500);
         } else {
             showToast('排队删除失败: ' + data.error, 'error');
         }
