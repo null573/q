@@ -657,9 +657,9 @@ async function loadOrders(page = 1, forceRefresh = false, options = {}) {
         const data = await response.json();
         if (requestSeq !== ordersRequestSeq) return;
         if (data.success) {
-            allOrders = data.orders.filter(order => !isRecentlyDeletedOrder(order));
-            currentPage = data.pagination.page;
-            totalPages = data.pagination.total_pages;
+            allOrders = (data.orders || []).filter(order => !isRecentlyDeletedOrder(order));
+            currentPage = data.pagination?.page || 1;
+            totalPages = data.pagination?.total_pages || 1;
             isAdmin = data.is_admin;
             viewMode = data.view_mode;
             renderOrders(allOrders);
@@ -735,7 +735,7 @@ function populateFilterModelSelect() {
 
 function renderOrders(orders) {
     const ordersList = document.getElementById('ordersList');
-    if (orders.length === 0) {
+    if (!orders || orders.length === 0) {
         ordersList.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><p>暂无排队</p></div>';
         return;
     }
