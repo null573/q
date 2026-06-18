@@ -1553,7 +1553,7 @@ async function loadModelConfigs() {
     const list = document.getElementById('modelConfigList');
     try {
         log.innerHTML = '加载中...';
-        const resp = await fetch(`/api/admin/model-configs?submitter_id=${currentUser.id}`);
+        const resp = await apiFetch(`/api/admin/model-configs?submitter_id=${currentUser.id}`);
         const data = await resp.json();
         if (data.success) {
             const configs = data.configs || {};
@@ -1596,7 +1596,7 @@ async function submitModelConfig() {
     }
     try {
         log.innerHTML = '保存中...';
-        const resp = await fetch(`/api/admin/model-configs?submitter_id=${currentUser.id}`, {
+        const resp = await apiFetch(`/api/admin/model-configs?submitter_id=${currentUser.id}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ model, sheet_id, start_row, capacity_col, limit_cell, row_count })
