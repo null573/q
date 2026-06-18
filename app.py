@@ -1491,5 +1491,20 @@ def test_connection():
         return jsonify({"success": False, "error": str(e)})
 
 
+def _warmup_cache():
+    """后台线程：定期预热缓存，保持服务活跃"""
+    import threading
+    def run():
+        while True:
+            try:
+                time.sleep(45)  # 每45秒预热一次
+                fetch_all_orders_raw()
+            except Exception as e:
+                print(f"[warmup] error: {e}")
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+
+_warmup_cache()
+
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
