@@ -659,8 +659,8 @@ async function loadOrders(page = 1, forceRefresh = false, options = {}) {
         if (requestSeq !== ordersRequestSeq) return;
         if (data.success) {
             const newOrders = (data.orders || []).filter(order => !isRecentlyDeletedOrder(order));
-            // 如果API返回空但之前有数据，保留旧数据（降级显示）
-            if (newOrders.length === 0 && allOrders.length > 0 && !forceRefresh) {
+            // 如果API返回空但之前有数据，始终保留旧数据（降级显示）
+            if (newOrders.length === 0 && allOrders.length > 0) {
                 console.warn('[loadOrders] API返回空，保留旧数据');
                 renderOrders(allOrders);
                 return;
@@ -1281,7 +1281,7 @@ function showTab(tabName, evt) {
     if (activeBtn) activeBtn.classList.add('active');
     document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
     document.getElementById(tabName + 'Tab').classList.add('active');
-    if (tabName === 'list') loadOrders(1, ordersDirty || allOrders.length === 0);
+    if (tabName === 'list') loadOrders(1, true);  // 切换tab时强制刷新
     if (tabName === 'admin') loadAdminStatus();
 }
 
