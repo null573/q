@@ -30,12 +30,19 @@ ACCESS_TOKEN = os.environ.get('ACCESS_TOKEN', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXV
 OPEN_ID = os.environ.get('OPEN_ID', '9bc172e5338147d8a35c1438ea8d1577')
 
 BASE_URL = "https://docs.qq.com/openapi/spreadsheet/v3"
+
+# 主Session用于Render/GitHub等外部API（可能走代理）
 HTTP = requests.Session()
-# 禁用代理，避免Render服务器上的HTTP_PROXY环境变量干扰腾讯API调用
-HTTP.trust_env = False
 adapter = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=20, max_retries=2)
 HTTP.mount('https://', adapter)
 HTTP.mount('http://', adapter)
+
+# 腾讯表格专用Session，明确禁用代理
+TENCENT_HTTP = requests.Session()
+TENCENT_HTTP.trust_env = False
+tencent_adapter = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=20, max_retries=2)
+TENCENT_HTTP.mount('https://', tencent_adapter)
+TENCENT_HTTP.mount('http://', tencent_adapter)
 
 # 访问密码
 ACCESS_PASSWORD = os.environ.get('ACCESS_PASSWORD', 'queue2025')
@@ -247,7 +254,7 @@ def read_users():
         return _users_cache["data"]
 
     url = f"{BASE_URL}/files/{USER_FILE_ID}/{USER_SHEET_ID}/A2:F200"
-    resp = HTTP.get(url, headers=get_headers(), timeout=30)
+    resp = TENCENT_HTTP.get(url, headers=get_headers(), timeout=30)
     users = []
     if resp.status_code == 200:
         data = resp.json()
@@ -371,7 +378,7 @@ def build_cell_value(value, is_date=False, is_number=False, font_size=14):
 def read_sheet_range(sheet_id, range_str):
     """读取表格范围数据，返回gridData"""
     url = f"{BASE_URL}/files/{FILE_ID}/{sheet_id}/{range_str}"
-    resp = HTTP.get(url, headers=get_headers(), timeout=30)
+    resp = TENCENT_HTTP.get(url, headers=get_headers(), timeout=30)
     if resp.status_code == 200:
         data = resp.json()
         return data.get("gridData", {})
@@ -414,7 +421,7 @@ def get_next_empty_row(sheet_id):
 def batch_update(requests_body):
     """执行批量更新操作"""
     url = f"{BASE_URL}/files/{FILE_ID}/batchUpdate"
-    resp = HTTP.post(url, headers=get_headers(), json=requests_body, timeout=30)
+    resp = TENCENT_HTTP.post(url, headers=get_headers(), json=requests_body, timeout=30)
     return resp
 
 
@@ -1226,7 +1233,7 @@ def update_password():
 
         # 读取用户表找到对应行
         url = f"{BASE_URL}/files/{USER_FILE_ID}/{USER_SHEET_ID}/A2:C200"
-        resp = HTTP.get(url, headers=get_headers(), timeout=30)
+        resp = TENCENT_HTTP.get(url, headers=get_headers(), timeout=30)
         if resp.status_code != 200:
             return jsonify({"success": False, "error": "读取用户表失败"})
 
@@ -1478,7 +1485,7 @@ def test_connection():
     """测试腾讯表格连接"""
     try:
         url = f"{BASE_URL}/files/{FILE_ID}"
-        resp = HTTP.get(url, headers=get_headers(), timeout=30)
+        resp = TENCENT_HTTP.get(url, headers=get_headers(), timeout=30)
         if resp.status_code == 200:
             data = resp.json()
             sheets = data.get("properties", [])
