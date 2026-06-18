@@ -1507,6 +1507,18 @@ def _warmup_keepalive():
     """后台线程：定期轻量级预热，保持服务活跃并刷新订单缓存"""
     import threading
     def run():
+        # 启动时立即尝试预热3次，建立初始缓存
+        for attempt in range(3):
+            try:
+                fetch_all_orders_raw()
+                if _orders_cache["data"] is not None and len(_orders_cache["data"]) > 0:
+                    print(f"[warmup] 初始缓存建立成功: {len(_orders_cache['data'])}条")
+                    break
+            except Exception as e:
+                print(f"[warmup] 初始预热失败(attempt {attempt+1}): {e}")
+            time.sleep(2)
+
+        # 之后每45秒刷新一次
         while True:
             try:
                 time.sleep(45)
