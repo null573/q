@@ -1505,37 +1505,19 @@ def test_connection():
 
 
 def _warmup_keepalive():
-    """后台线程：定期轻量级预热，保持服务活跃并刷新订单缓存"""
+    """后台线程：启动时预热建立初始缓存"""
     import threading
     def run():
         # 启动时立即尝试预热3次，建立初始缓存
         for attempt in range(3):
             try:
                 fetch_all_orders_raw()
-                if _orders_cache["data"] is not None and len(_orders_cache["data"]) > 0:
+                if _orders_cache["data"] and len(_orders_cache["data"]) > 0:
                     print(f"[warmup] 初始缓存建立成功: {len(_orders_cache['data'])}条")
                     break
             except Exception as e:
                 print(f"[warmup] 初始预热失败(attempt {attempt+1}): {e}")
             time.sleep(2)
-
-        # 之后每45秒刷新一次
-        while True:
-            try:
-                time.sleep(45)
-                # 轻量级预热：只读取表格元数据（1个API调用），不读取全部订单
-                url = f"{BASE_URL}/files/{FILE_ID}"
-                resp = HTTP.get(url, headers=get_headers(), timeout=10)
-                if resp.status_code == 200:
-                    # 元数据读取成功，说明网络通畅，刷新订单缓存
-                    # 使用临时过期标记，避免影响并发请求
-                    _orders_cache["_refresh_flag"] = True
-                    result = fetch_all_orders_raw()
-                    del _orders_cache["_refresh_flag"]
-                    if not result and _orders_cache.get("data"):
-                        print("[warmup] 刷新失败，保留旧缓存")
-            except Exception as e:
-                print(f"[warmup] error: {e}")
     t = threading.Thread(target=run, daemon=True)
     t.start()
 
