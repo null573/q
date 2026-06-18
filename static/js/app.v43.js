@@ -7,6 +7,8 @@ let pendingRowIndex = 0;
 let currentPage = 1;
 let totalPages = 1;
 let isAdmin = false;
+let isManager = false;
+let accessLevel = 'self';
 let viewMode = 'mine'; // 'mine' 或 'all'
 let listenersInitialized = false;
 let ordersDirty = true;
@@ -693,6 +695,8 @@ async function loadOrders(page = 1, forceRefresh = false, options = {}) {
             currentPage = data.pagination?.page || 1;
             totalPages = data.pagination?.total_pages || 1;
             isAdmin = data.is_admin;
+            isManager = data.access_level === 'department';
+            accessLevel = data.access_level || 'self';
             viewMode = data.view_mode;
             renderOrders(allOrders);
             renderPagination();
@@ -788,14 +792,18 @@ function renderOrders(orders) {
         return;
     }
 
+    // 权限判断：业务员（非管理员非经理）在全部排队隐藏客户+禁止操作
+    const canSeeCustomer = viewMode === 'mine' || isAdmin || isManager;
+    const canOperate = viewMode === 'mine' || isAdmin || isManager;
+
     let html = `<table class="order-table">
         <thead>
             <tr>
                 <th>型号</th>
                 <th>吨位</th>
-                ${(!isAdmin && viewMode === 'all') ? '' : '<th>客户</th>'}
+                ${canSeeCustomer ? '<th>客户</th>' : ''}
                 <th>排队日期</th>
-                <th>操作</th>
+                ${canOperate ? '<th>操作</th>' : ''}
             </tr>
         </thead>
         <tbody>`;
@@ -811,13 +819,13 @@ function renderOrders(orders) {
         html += `<tr>
             <td class="td-model">${escapeHtml(order.model)}</td>
             <td>${escapeHtml(order.tonnage)}</td>
-            ${(!isAdmin && viewMode === 'all') ? '' : '<td>' + escapeHtml(order.customer) + '</td>'}
+            ${canSeeCustomer ? '<td>' + escapeHtml(order.customer) + '</td>' : ''}
             <td>${queueDateDisplay}</td>
-            <td class="td-actions">
+            ${canOperate ? `<td class="td-actions">
                 <button class="btn-edit" onclick="openEditModal(${order.row_index})">改</button>
                 <button class="btn-copy" onclick="copyOrder(${order.row_index})">复</button>
                 <button class="btn-delete" onclick="deleteOrder(${order.row_index})">删</button>
-            </td>
+            </td>` : ''}
         </tr>`;
     });
 
