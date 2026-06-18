@@ -140,7 +140,11 @@ def add_cache_headers(response):
     """静态资源强缓存；动态接口按数据实时性分别控制缓存"""
     path = request.path or ""
     if path.startswith("/static/"):
-        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        # 带版本号的静态资源可长期缓存；不带版本号的不缓存
+        if "?v=" in request.query_string.decode():
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            response.headers["Cache-Control"] = "no-cache, must-revalidate"
         response.headers.pop("Pragma", None)
         response.headers.pop("Expires", None)
     elif path == "/api/models":
