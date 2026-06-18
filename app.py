@@ -749,7 +749,8 @@ def _read_batch(sheet_id, range_str):
     return read_sheet_range(sheet_id, range_str)
 
 def fetch_all_orders_raw():
-    """从腾讯表格读取所有订单原始数据，带缓存，并行读取加速"""
+    """从腾讯表格读取所有订单原始数据，带缓存，并行读取加速
+    如果API读取失败且缓存中有数据，返回缓存数据（降级策略）"""
     now = datetime.now().timestamp()
     if _orders_cache["data"] is not None and (now - _orders_cache["timestamp"]) < CACHE_TTL:
         return _orders_cache["data"]
@@ -785,6 +786,9 @@ def fetch_all_orders_raw():
                 break
 
     if last_data_row <= 1:
+        # API可能返回空，如果有缓存数据则使用缓存（降级）
+        if _orders_cache["data"] is not None:
+            return _orders_cache["data"]
         _orders_cache["data"] = []
         _orders_cache["timestamp"] = now
         return []
@@ -849,6 +853,10 @@ def fetch_all_orders_raw():
                 "submitter_id": row_data[10],
                 "submit_time": row_data[11]
             })
+
+    # 如果解析结果为空但有缓存数据，使用缓存（降级）
+    if not orders and _orders_cache["data"] is not None and len(_orders_cache["data"]) > 0:
+        return _orders_cache["data"]
 
     _orders_cache["data"] = orders
     _orders_cache["timestamp"] = now
