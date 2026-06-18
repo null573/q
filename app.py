@@ -932,7 +932,8 @@ def get_filtered_orders(submitter_id, current_user, view_mode, submitter_name=""
     submitter_name = resolve_submitter_name(submitter_id, submitter_name)
     access_level = (current_user or {}).get("access_level", "self")
     is_mine_view = view_mode == "mine"
-    cache_key = f"{access_level}:{view_mode}:{normalize_user_key(submitter_id)}:{submitter_name}:{(current_user or {}).get('department', '')}"
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    cache_key = f"{access_level}:{view_mode}:{normalize_user_key(submitter_id)}:{submitter_name}:{(current_user or {}).get('department', '')}:{today_str}"
 
     # 检查过滤缓存是否有效（基于原始数据的时间戳）
     if (not is_mine_view and
