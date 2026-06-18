@@ -1508,8 +1508,9 @@ def _warmup_keepalive():
     """后台线程：启动时预热建立初始缓存"""
     import threading
     def run():
-        # 启动时立即尝试预热3次，建立初始缓存
-        for attempt in range(3):
+        # 启动时等待服务完全就绪，然后尝试预热10次建立初始缓存
+        time.sleep(5)
+        for attempt in range(10):
             try:
                 fetch_all_orders_raw()
                 if _orders_cache["data"] and len(_orders_cache["data"]) > 0:
@@ -1517,7 +1518,7 @@ def _warmup_keepalive():
                     break
             except Exception as e:
                 print(f"[warmup] 初始预热失败(attempt {attempt+1}): {e}")
-            time.sleep(2)
+            time.sleep(3)
     t = threading.Thread(target=run, daemon=True)
     t.start()
 
