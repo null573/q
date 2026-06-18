@@ -777,9 +777,9 @@ def fetch_all_orders_raw():
                         if text.strip():
                             last_data_row = max(last_data_row, actual_row)
                             batch_has_data = True
-            # 如果该批次全部为空，后续批次也必然为空，提前停止
-            if not batch_has_data:
-                break
+            # 不再提前停止——数据可能不连续（中间有空行）
+            # if not batch_has_data:
+            #     break
 
     if last_data_row <= 1:
         # API读取失败时，如果有有效缓存则返回缓存（避免显示空）
