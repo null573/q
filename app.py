@@ -749,14 +749,14 @@ def _read_batch(sheet_id, range_str):
     """读取一批数据，供并行调用"""
     return read_sheet_range(sheet_id, range_str)
 
-def _read_batch_with_retry(sheet_id, range_str, max_retries=2):
+def _read_batch_with_retry(sheet_id, range_str, max_retries=1):
     """读取一批数据，带重试"""
     for attempt in range(max_retries + 1):
         result = read_sheet_range(sheet_id, range_str)
         rows = result.get("rows", [])
         if rows or attempt == max_retries:
             return result
-        time.sleep(0.5 * (attempt + 1))
+        time.sleep(0.3)
     return {}
 
 
