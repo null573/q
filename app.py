@@ -1498,20 +1498,26 @@ def test_connection():
         return jsonify({"success": False, "error": str(e)})
 
 
-def _warmup_cache():
-    """后台线程：定期预热缓存，保持服务活跃"""
+def _warmup_keepalive():
+    """后台线程：定期轻量级预热，保持服务活跃并刷新订单缓存"""
     import threading
     def run():
         while True:
             try:
-                time.sleep(45)  # 每45秒预热一次
-                fetch_all_orders_raw()
+                time.sleep(45)
+                # 轻量级预热：只读取表格元数据（1个API调用），不读取全部订单
+                url = f"{BASE_URL}/files/{FILE_ID}"
+                resp = HTTP.get(url, headers=get_headers(), timeout=10)
+                if resp.status_code == 200:
+                    # 元数据读取成功，说明网络通畅，刷新订单缓存
+                    _orders_cache["timestamp"] = 0
+                    fetch_all_orders_raw()
             except Exception as e:
                 print(f"[warmup] error: {e}")
     t = threading.Thread(target=run, daemon=True)
     t.start()
 
-_warmup_cache()
+_warmup_keepalive()
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
