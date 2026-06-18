@@ -530,7 +530,7 @@ async function calculateDate() {
                 queueDateInput.disabled = false;
                 queueDateInput.style.background = '#fff';
                 queueDateInput.style.color = '';
-                queueDateInput.style.cursor = 'pointer';
+                queueDateInput.style.cursor = 'text';
                 queueDateInput.placeholder = '点击选择日期';
                 queueDateInput.value = calcDate;
                 const oldHint = queueDateInput.parentNode.querySelector('.queue-date-hint');
@@ -539,7 +539,7 @@ async function calculateDate() {
                 queueDateInput.style.display = '';
                 queueDateInput.disabled = false;
                 queueDateInput.style.background = '#fff';
-                queueDateInput.style.cursor = 'pointer';
+                queueDateInput.style.cursor = 'text';
                 queueDateInput.placeholder = '点击选择日期';
                 const oldHint = queueDateInput.parentNode.querySelector('.queue-date-hint');
                 if (oldHint) oldHint.remove();
@@ -1546,27 +1546,32 @@ async function adminHealthCheck() {
     }
 }
 
-// ==================== 计算公式管理 ====================
+// ==================== 型号产能配置管理 ====================
 
-async function loadFormulas() {
-    const log = document.getElementById('formulaLog');
-    const list = document.getElementById('formulaList');
+async function loadModelConfigs() {
+    const log = document.getElementById('modelConfigLog');
+    const list = document.getElementById('modelConfigList');
     try {
         log.innerHTML = '加载中...';
-        const resp = await fetch(`/api/admin/formulas?submitter_id=${currentUser.id}`);
+        const resp = await fetch(`/api/admin/model-configs?submitter_id=${currentUser.id}`);
         const data = await resp.json();
         if (data.success) {
-            const formulas = data.formulas || {};
-            if (Object.keys(formulas).length === 0) {
-                list.innerHTML = '<p style="color:#999;padding:8px;">暂无公式配置</p>';
-                log.innerHTML = '当前无公式，请在上方输入框中添加。';
+            const configs = data.configs || {};
+            const keys = Object.keys(configs);
+            if (keys.length === 0) {
+                list.innerHTML = '<p style="color:#999;padding:8px;">暂无配置</p>';
+                log.innerHTML = '当前无型号配置。';
             } else {
-                const lines = Object.entries(formulas).map(([k, v]) => `<div style="padding:6px 10px;background:#f8f9fa;border-radius:6px;margin-bottom:4px;font-family:monospace;"><strong>${k}</strong> = ${v}</div>`).join('');
-                list.innerHTML = lines;
-                // 填充到输入框
-                const text = Object.entries(formulas).map(([k, v]) => `${k}=${v}`).join('\n');
-                document.getElementById('formulaInput').value = text;
-                log.innerHTML = `已加载 ${Object.keys(formulas).length} 条公式`;
+                const rows = keys.map(k => {
+                    const c = configs[k];
+                    const color = c.source === '内置' ? '#666' : '#27ae60';
+                    return `<div style="padding:6px 10px;background:#f8f9fa;border-radius:6px;margin-bottom:4px;font-size:13px;">
+                        <strong>${k}</strong> <span style="color:${color};font-size:11px;">[${c.source}]</span><br>
+                        Sheet: ${c.sheet_id} | 起始行: ${c.start_row} | 产能列: ${c.capacity_col} | 上限: ${c.limit_cell} | 行数: ${c.row_count}
+                    </div>`;
+                }).join('');
+                list.innerHTML = rows;
+                log.innerHTML = `已加载 ${keys.length} 条配置`;
             }
         } else {
             log.innerHTML = '<span style="color:#e74c3c;">加载失败: ' + (data.error || '') + '</span>';
@@ -1576,40 +1581,32 @@ async function loadFormulas() {
     }
 }
 
-async function submitFormulas() {
-    const log = document.getElementById('formulaLog');
-    const text = document.getElementById('formulaInput').value.trim();
-    if (!text) {
-        log.innerHTML = '<span style="color:#e74c3c;">请输入至少一条公式</span>';
+async function submitModelConfig() {
+    const log = document.getElementById('modelConfigLog');
+    const model = document.getElementById('cfgModel').value.trim();
+    const sheet_id = document.getElementById('cfgSheetId').value.trim();
+    const start_row = document.getElementById('cfgStartRow').value.trim();
+    const capacity_col = document.getElementById('cfgCapCol').value.trim();
+    const limit_cell = document.getElementById('cfgLimitCell').value.trim();
+    const row_count = document.getElementById('cfgRowCount').value.trim();
+
+    if (!model || !sheet_id || !start_row || !capacity_col || !limit_cell || !row_count) {
+        log.innerHTML = '<span style="color:#e74c3c;">所有字段都必须填写</span>';
         return;
-    }
-    const formulas = {};
-    const lines = text.split('\n').filter(l => l.trim());
-    for (const line of lines) {
-        const eqIdx = line.indexOf('=');
-        if (eqIdx <= 0) {
-            log.innerHTML = `<span style="color:#e74c3c;">格式错误: "${line}"，应为 型号=公式</span>`;
-            return;
-        }
-        const model = line.substring(0, eqIdx).trim();
-        const formula = line.substring(eqIdx + 1).trim();
-        if (!model || !formula) {
-            log.innerHTML = `<span style="color:#e74c3c;">格式错误: "${line}"</span>`;
-            return;
-        }
-        formulas[model] = formula;
     }
     try {
         log.innerHTML = '保存中...';
-        const resp = await fetch(`/api/admin/formulas?submitter_id=${currentUser.id}`, {
+        const resp = await fetch(`/api/admin/model-configs?submitter_id=${currentUser.id}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ formulas })
+            body: JSON.stringify({ model, sheet_id, start_row, capacity_col, limit_cell, row_count })
         });
         const data = await resp.json();
         if (data.success) {
-            log.innerHTML = `<span style="color:#27ae60;">${data.message}，已提交。我将把公式集成到计算引擎代码中。</span>`;
-            loadFormulas();
+            log.innerHTML = `<span style="color:#27ae60;">${data.message}。请通知我将此配置集成到计算引擎代码中。</span>`;
+            loadModelConfigs();
+            // 清空输入框
+            ['cfgModel','cfgSheetId','cfgStartRow','cfgCapCol','cfgLimitCell','cfgRowCount'].forEach(id => document.getElementById(id).value = '');
         } else {
             log.innerHTML = '<span style="color:#e74c3c;">保存失败: ' + (data.error || '') + '</span>';
         }

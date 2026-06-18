@@ -1524,50 +1524,73 @@ def _warmup_keepalive():
 
 _warmup_keepalive()
 
-# ==================== 计算公式管理 API ====================
+# ==================== 型号产能配置管理 API ====================
 
-FORMULA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'formulas.json')
+MODEL_CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'model_configs.json')
 
-def _load_formulas():
-    """加载公式配置"""
+def _load_model_configs():
+    """加载型号配置"""
     try:
-        if os.path.exists(FORMULA_FILE):
-            with open(FORMULA_FILE, 'r', encoding='utf-8') as f:
+        if os.path.exists(MODEL_CONFIG_FILE):
+            with open(MODEL_CONFIG_FILE, 'r', encoding='utf-8') as f:
                 return json.load(f)
     except:
         pass
     return {}
 
-def _save_formulas(formulas):
-    """保存公式配置"""
-    with open(FORMULA_FILE, 'w', encoding='utf-8') as f:
-        json.dump(formulas, f, ensure_ascii=False, indent=2)
+def _save_model_configs(configs):
+    """保存型号配置"""
+    with open(MODEL_CONFIG_FILE, 'w', encoding='utf-8') as f:
+        json.dump(configs, f, ensure_ascii=False, indent=2)
 
-@app.route('/api/admin/formulas', methods=['GET'])
+@app.route('/api/admin/model-configs', methods=['GET'])
 @require_auth
-def get_formulas():
-    """获取当前公式配置"""
+def get_model_configs():
+    """获取当前型号配置（合并代码内置 + 用户添加）"""
     try:
         current_user_id = request.args.get('submitter_id', '')
         if current_user_id != ADMIN_EMPLOYEE_ID:
             return jsonify({"success": False, "error": "无权限"})
-        formulas = _load_formulas()
-        return jsonify({"success": True, "formulas": formulas})
+        from calc_engine import MODEL_CONFIG
+        user_configs = _load_model_configs()
+        # 合并显示：代码内置 + 用户添加
+        merged = {}
+        for k, v in MODEL_CONFIG.items():
+            merged[k] = {"sheet_id": v[0], "start_row": v[1], "capacity_col": v[2], "limit_cell": v[3], "row_count": v[4], "source": "内置"}
+        for k, v in user_configs.items():
+            merged[k] = {"sheet_id": v[0], "start_row": v[1], "capacity_col": v[2], "limit_cell": v[3], "row_count": v[4], "source": "用户添加"}
+        return jsonify({"success": True, "configs": merged})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
-@app.route('/api/admin/formulas', methods=['POST'])
+@app.route('/api/admin/model-configs', methods=['POST'])
 @require_auth
-def save_formulas():
-    """保存公式配置"""
+def save_model_config():
+    """保存型号配置"""
     try:
         current_user_id = request.args.get('submitter_id', '')
         if current_user_id != ADMIN_EMPLOYEE_ID:
             return jsonify({"success": False, "error": "无权限"})
         data = request.json
-        formulas = data.get('formulas', {})
-        _save_formulas(formulas)
-        return jsonify({"success": True, "message": f"已保存 {len(formulas)} 条公式"})
+        model = data.get('model', '').strip()
+        sheet_id = data.get('sheet_id', '').strip()
+        start_row = data.get('start_row', 0)
+        capacity_col = data.get('capacity_col', '').strip().upper()
+        limit_cell = data.get('limit_cell', '').strip().upper()
+        row_count = data.get('row_count', 0)
+
+        if not model or not sheet_id or not capacity_col or not limit_cell:
+            return jsonify({"success": False, "error": "型号、Sheet ID、产能列、上限日期单元格不能为空"})
+        try:
+            start_row = int(start_row)
+            row_count = int(row_count)
+        except:
+            return jsonify({"success": False, "error": "起始行号和行数必须是数字"})
+
+        configs = _load_model_configs()
+        configs[model] = [sheet_id, start_row, capacity_col, limit_cell, row_count]
+        _save_model_configs(configs)
+        return jsonify({"success": True, "message": f"型号 {model} 配置已保存"})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 

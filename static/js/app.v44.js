@@ -202,7 +202,13 @@ function initApp() {
     tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowStr = tomorrow.toISOString().split('T')[0];
     document.getElementById('expectedDate').value = tomorrowStr;
-    document.getElementById('queueDate').value = tomorrowStr;
+    document.getElementById('queueDate').value = '';
+    // queueDate 初始为禁用，等 calculatedDate 计算完成后才可编辑
+    const queueDateInput = document.getElementById('queueDate');
+    queueDateInput.disabled = true;
+    queueDateInput.placeholder = '请先选择型号和吨位计算可发货日期';
+    queueDateInput.style.cursor = 'not-allowed';
+    queueDateInput.style.background = '#e9ecef';
     // 绑定事件监听器
     setupEventListeners();
     setupEditQueueDateListener();
@@ -522,14 +528,19 @@ async function calculateDate() {
             } else if (isDate) {
                 queueDateInput.style.display = '';
                 queueDateInput.disabled = false;
-                queueDateInput.style.background = '';
+                queueDateInput.style.background = '#fff';
                 queueDateInput.style.color = '';
+                queueDateInput.style.cursor = 'text';
+                queueDateInput.placeholder = '点击选择日期';
                 queueDateInput.value = calcDate;
                 const oldHint = queueDateInput.parentNode.querySelector('.queue-date-hint');
                 if (oldHint) oldHint.remove();
             } else {
                 queueDateInput.style.display = '';
                 queueDateInput.disabled = false;
+                queueDateInput.style.background = '#fff';
+                queueDateInput.style.cursor = 'text';
+                queueDateInput.placeholder = '点击选择日期';
                 const oldHint = queueDateInput.parentNode.querySelector('.queue-date-hint');
                 if (oldHint) oldHint.remove();
             }
@@ -619,7 +630,11 @@ async function handleCreateOrder(e) {
             tomorrow.setDate(tomorrow.getDate() + 1);
             const tomorrowStr = tomorrow.toISOString().split('T')[0];
             document.getElementById('expectedDate').value = tomorrowStr;
-            document.getElementById('queueDate').value = tomorrowStr;
+            document.getElementById('queueDate').value = '';
+            document.getElementById('queueDate').disabled = true;
+            document.getElementById('queueDate').placeholder = '请先选择型号和吨位计算可发货日期';
+            document.getElementById('queueDate').style.cursor = 'not-allowed';
+            document.getElementById('queueDate').style.background = '#e9ecef';
             document.getElementById('calculatedDate').value = '';
             pendingRowIndex = 0; // 清空
             draftQueue = null; // 清除草稿
@@ -1528,5 +1543,74 @@ async function adminHealthCheck() {
         bar.style.display = '';
     } catch (e) {
         bar.style.display = 'none';
+    }
+}
+
+// ==================== 型号产能配置管理 ====================
+
+async function loadModelConfigs() {
+    const log = document.getElementById('modelConfigLog');
+    const list = document.getElementById('modelConfigList');
+    try {
+        log.innerHTML = '加载中...';
+        const resp = await fetch(`/api/admin/model-configs?submitter_id=${currentUser.id}`);
+        const data = await resp.json();
+        if (data.success) {
+            const configs = data.configs || {};
+            const keys = Object.keys(configs);
+            if (keys.length === 0) {
+                list.innerHTML = '<p style="color:#999;padding:8px;">暂无配置</p>';
+                log.innerHTML = '当前无型号配置。';
+            } else {
+                const rows = keys.map(k => {
+                    const c = configs[k];
+                    const color = c.source === '内置' ? '#666' : '#27ae60';
+                    return `<div style="padding:6px 10px;background:#f8f9fa;border-radius:6px;margin-bottom:4px;font-size:13px;">
+                        <strong>${k}</strong> <span style="color:${color};font-size:11px;">[${c.source}]</span><br>
+                        Sheet: ${c.sheet_id} | 起始行: ${c.start_row} | 产能列: ${c.capacity_col} | 上限: ${c.limit_cell} | 行数: ${c.row_count}
+                    </div>`;
+                }).join('');
+                list.innerHTML = rows;
+                log.innerHTML = `已加载 ${keys.length} 条配置`;
+            }
+        } else {
+            log.innerHTML = '<span style="color:#e74c3c;">加载失败: ' + (data.error || '') + '</span>';
+        }
+    } catch (e) {
+        log.innerHTML = '<span style="color:#e74c3c;">网络错误</span>';
+    }
+}
+
+async function submitModelConfig() {
+    const log = document.getElementById('modelConfigLog');
+    const model = document.getElementById('cfgModel').value.trim();
+    const sheet_id = document.getElementById('cfgSheetId').value.trim();
+    const start_row = document.getElementById('cfgStartRow').value.trim();
+    const capacity_col = document.getElementById('cfgCapCol').value.trim();
+    const limit_cell = document.getElementById('cfgLimitCell').value.trim();
+    const row_count = document.getElementById('cfgRowCount').value.trim();
+
+    if (!model || !sheet_id || !start_row || !capacity_col || !limit_cell || !row_count) {
+        log.innerHTML = '<span style="color:#e74c3c;">所有字段都必须填写</span>';
+        return;
+    }
+    try {
+        log.innerHTML = '保存中...';
+        const resp = await fetch(`/api/admin/model-configs?submitter_id=${currentUser.id}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model, sheet_id, start_row, capacity_col, limit_cell, row_count })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            log.innerHTML = `<span style="color:#27ae60;">${data.message}。请通知我将此配置集成到计算引擎代码中。</span>`;
+            loadModelConfigs();
+            // 清空输入框
+            ['cfgModel','cfgSheetId','cfgStartRow','cfgCapCol','cfgLimitCell','cfgRowCount'].forEach(id => document.getElementById(id).value = '');
+        } else {
+            log.innerHTML = '<span style="color:#e74c3c;">保存失败: ' + (data.error || '') + '</span>';
+        }
+    } catch (e) {
+        log.innerHTML = '<span style="color:#e74c3c;">网络错误</span>';
     }
 }

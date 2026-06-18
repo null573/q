@@ -151,15 +151,22 @@
             </div>
 
             <div class="admin-card" style="margin-top:16px;">
-                <h2 class="admin-title">可发货日期计算公式</h2>
-                <p class="admin-desc">添加或修改型号的可发货日期计算公式。格式：每行一条，<code>型号=公式</code>。公式中可用变量：<code>{吨位}</code>、<code>{期望日期}</code>。示例：<code>C220={期望日期}+{吨位}*0.5天</code></p>
-                <textarea id="formulaInput" rows="8" placeholder="C220={期望日期}+{吨位}*0.5天&#10;330N={期望日期}+15天&#10;F3500={期望日期}+{吨位}*1天" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;font-size:14px;font-family:monospace;resize:vertical;box-sizing:border-box;"></textarea>
-                <div style="margin-top:10px;display:flex;gap:10px;">
-                    <button onclick="submitFormulas()" class="btn-submit" style="padding:10px 24px;">提交公式</button>
-                    <button onclick="loadFormulas()" class="btn-reset" style="padding:10px 24px;">加载现有公式</button>
+                <h2 class="admin-title">型号产能配置</h2>
+                <p class="admin-desc">新增或修改型号的可发货日期计算配置。每个型号对应腾讯表格中的一个工作表（sheet），填写对应参数后提交，我会将配置添加到计算引擎。</p>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px;">
+                    <div><label style="font-size:13px;color:#555;">型号名称</label><input type="text" id="cfgModel" placeholder="如 C220" style="width:100%;padding:8px 10px;border:1px solid #ddd;border-radius:6px;margin-top:4px;box-sizing:border-box;"></div>
+                    <div><label style="font-size:13px;color:#555;">工作表 Sheet ID</label><input type="text" id="cfgSheetId" placeholder="如 000003" style="width:100%;padding:8px 10px;border:1px solid #ddd;border-radius:6px;margin-top:4px;box-sizing:border-box;"></div>
+                    <div><label style="font-size:13px;color:#555;">数据起始行号</label><input type="number" id="cfgStartRow" placeholder="如 4" style="width:100%;padding:8px 10px;border:1px solid #ddd;border-radius:6px;margin-top:4px;box-sizing:border-box;"></div>
+                    <div><label style="font-size:13px;color:#555;">产能列字母</label><input type="text" id="cfgCapCol" placeholder="如 AD" style="width:100%;padding:8px 10px;border:1px solid #ddd;border-radius:6px;margin-top:4px;box-sizing:border-box;"></div>
+                    <div><label style="font-size:13px;color:#555;">上限日期单元格</label><input type="text" id="cfgLimitCell" placeholder="如 F1" style="width:100%;padding:8px 10px;border:1px solid #ddd;border-radius:6px;margin-top:4px;box-sizing:border-box;"></div>
+                    <div><label style="font-size:13px;color:#555;">数据行数</label><input type="number" id="cfgRowCount" placeholder="如 180" style="width:100%;padding:8px 10px;border:1px solid #ddd;border-radius:6px;margin-top:4px;box-sizing:border-box;"></div>
                 </div>
-                <div id="formulaLog" class="admin-log" style="margin-top:10px;"></div>
-                <div id="formulaList" style="margin-top:10px;max-height:300px;overflow-y:auto;"></div>
+                <div style="margin-top:12px;display:flex;gap:10px;">
+                    <button onclick="submitModelConfig()" class="btn-submit" style="padding:10px 24px;">提交配置</button>
+                    <button onclick="loadModelConfigs()" class="btn-reset" style="padding:10px 24px;">加载现有配置</button>
+                </div>
+                <div id="modelConfigLog" class="admin-log" style="margin-top:10px;"></div>
+                <div id="modelConfigList" style="margin-top:10px;max-height:300px;overflow-y:auto;"></div>
             </div>
         </div>
     </div>
