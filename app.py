@@ -776,6 +776,9 @@ def fetch_all_orders_raw():
                 break
 
     if last_data_row <= 1:
+        # API读取失败时，如果有缓存数据则返回缓存（避免显示空）
+        if _orders_cache["data"] is not None and len(_orders_cache["data"]) > 0:
+            return _orders_cache["data"]
         _orders_cache["data"] = []
         _orders_cache["timestamp"] = now
         return []
@@ -840,6 +843,10 @@ def fetch_all_orders_raw():
                 "submitter_id": row_data[10],
                 "submit_time": row_data[11]
             })
+
+    # 如果解析结果为空但有缓存数据，使用缓存（降级）
+    if not orders and _orders_cache["data"] is not None and len(_orders_cache["data"]) > 0:
+        return _orders_cache["data"]
 
     _orders_cache["data"] = orders
     _orders_cache["timestamp"] = now
