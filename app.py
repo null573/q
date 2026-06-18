@@ -1527,8 +1527,16 @@ def _warmup_keepalive():
                 resp = HTTP.get(url, headers=get_headers(), timeout=10)
                 if resp.status_code == 200:
                     # 元数据读取成功，说明网络通畅，刷新订单缓存
+                    # 先备份当前缓存，如果刷新失败则恢复
+                    old_data = _orders_cache["data"]
+                    old_timestamp = _orders_cache["timestamp"]
                     _orders_cache["timestamp"] = 0
-                    fetch_all_orders_raw()
+                    result = fetch_all_orders_raw()
+                    if not result and old_data is not None:
+                        # 刷新失败，恢复旧缓存
+                        _orders_cache["data"] = old_data
+                        _orders_cache["timestamp"] = old_timestamp
+                        print("[warmup] 刷新失败，保留旧缓存")
             except Exception as e:
                 print(f"[warmup] error: {e}")
     t = threading.Thread(target=run, daemon=True)
