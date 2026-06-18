@@ -645,19 +645,27 @@ async function loadOrders(page = 1, forceRefresh = false, options = {}) {
     try {
         currentPage = page;
         const viewModeParam = `&view_mode=${viewMode}`;
-        const refreshParam = forceRefresh ? `&_ts=${Date.now()}` : '';
+        // 始终带时间戳，避免浏览器缓存返回旧数据
+        const refreshParam = `&_ts=${Date.now()}`;
         const submitterNameParam = `&submitter_name=${encodeURIComponent(currentUser.name || '')}`;
         const modelFilter = encodeURIComponent(document.getElementById('filterModel')?.value || '');
         const customerFilter = encodeURIComponent(document.getElementById('filterCustomer')?.value.trim() || '');
         const sortType = encodeURIComponent(document.getElementById('sortSelect')?.value || '');
         const filterParams = `&model_filter=${modelFilter}&customer_filter=${customerFilter}&sort=${sortType}`;
         const response = await apiFetch(`${API_BASE}/api/orders?submitter_id=${encodeURIComponent(currentUser.id || '')}${submitterNameParam}&page=${page}&per_page=${PER_PAGE}${viewModeParam}${filterParams}${refreshParam}`, {
-            cache: forceRefresh ? 'no-store' : 'default'
+            cache: 'no-store'
         });
         const data = await response.json();
         if (requestSeq !== ordersRequestSeq) return;
         if (data.success) {
-            allOrders = (data.orders || []).filter(order => !isRecentlyDeletedOrder(order));
+            const newOrders = (data.orders || []).filter(order => !isRecentlyDeletedOrder(order));
+            // 如果API返回空但之前有数据，保留旧数据（降级显示）
+            if (newOrders.length === 0 && allOrders.length > 0 && !forceRefresh) {
+                console.warn('[loadOrders] API返回空，保留旧数据');
+                renderOrders(allOrders);
+                return;
+            }
+            allOrders = newOrders;
             currentPage = data.pagination?.page || 1;
             totalPages = data.pagination?.total_pages || 1;
             isAdmin = data.is_admin;
@@ -669,11 +677,23 @@ async function loadOrders(page = 1, forceRefresh = false, options = {}) {
             ordersDirty = false;
         } else {
             if (silent) return;
+            // 请求失败时，如果有旧数据则显示旧数据
+            if (allOrders.length > 0) {
+                renderOrders(allOrders);
+                showToast('数据加载失败，显示的是缓存数据', 'warning');
+                return;
+            }
             ordersList.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><p>加载失败: ' + data.error + '</p></div>';
         }
     } catch (error) {
         if (requestSeq !== ordersRequestSeq || silent) return;
         console.error('[loadOrders] error:', error);
+        // 网络错误时，如果有旧数据则显示旧数据
+        if (allOrders.length > 0) {
+            renderOrders(allOrders);
+            showToast('网络错误，显示的是缓存数据', 'warning');
+            return;
+        }
         ordersList.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><p>网络错误，请检查连接</p></div>';
     }
 }

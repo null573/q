@@ -717,7 +717,7 @@ def create_order():
 _orders_cache = {"data": None, "timestamp": 0}
 # 全局缓存：过滤+排序后的结果（按用户和view_mode缓存）
 _filtered_cache = {"timestamp": 0}
-CACHE_TTL = 60  # 缓存60秒
+CACHE_TTL = 120  # 缓存120秒，减少API调用频率
 
 def clear_order_caches():
     """清空订单相关缓存，确保增删改后页面重新读取腾讯表最新数据"""
