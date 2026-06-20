@@ -380,19 +380,12 @@ def read_sheet_range(sheet_id, range_str):
     return {}
 
 
-def get_next_empty_row(sheet_id):
+def get_next_empty_row(sheet_id, start_from=2):
     """获取表格下一个空行号（1-based），从A列第一个空行开始扫描（跳过表头第1行）
-    使用缓存：从上次找到的空行号开始向后搜索，避免每次从第2行扫起
     优化：增大批次到500行，减少API调用次数
-    优化2：连续提交时，直接从上次空行的下一行开始（因为上次空行已被写入）"""
-    cached_row = _last_empty_row_cache.get("row", 0)
-    # 优化：如果上次找到了空行，它很可能已被写入，直接从下一行开始
-    if cached_row > 0:
-        start_search = cached_row + 1
-    else:
-        start_search = 2
+    安全：start_from 参数允许调用方指定从哪行开始扫描，避免多人并发时依赖全局缓存"""
     batch_size = 500
-    for offset in range(start_search - 1, 2000, batch_size):
+    for offset in range(start_from - 1, 2000, batch_size):
         start = offset + 1  # 1-based
         end = offset + batch_size
         range_str = f"A{start}:A{end}"
@@ -413,7 +406,6 @@ def get_next_empty_row(sheet_id):
                         has_data = True
                         break
             if not has_data:
-                _last_empty_row_cache["row"] = actual_row
                 return actual_row
 
     return 2001  # 如果前2000行都满了
@@ -428,57 +420,64 @@ def batch_update(requests_body):
 
 def ensure_sheet_rows(min_row_count):
     """确保表格至少有 min_row_count 行，不足时自动添加行（每次批量添加500行）
-    带缓存：记住上次表格总行数，避免每次都调用API查询"""
-    # 缓存上次已知的表格总行数
+    带缓存+锁：记住上次表格总行数，避免每次都调用API查询；加锁避免多人同时重复扩容"""
+    # 快速路径：缓存命中直接返回（无锁）
     cached_count = _sheet_row_count_cache.get("count", 0)
     if cached_count >= min_row_count:
         return True
 
-    # 先获取当前表格信息
-    url = f"{BASE_URL}/files/{FILE_ID}"
-    resp = HTTP.get(url, headers=get_headers(), timeout=30)
-    if resp.status_code != 200:
-        return False
-    data = resp.json()
-    sheets = data.get("data", {}).get("sheets", [])
-    current_row_count = 0
-    for s in sheets:
-        if s.get("sheetID") == SHEET_ID:
-            current_row_count = s.get("rowCount", 0)
-            break
-    if current_row_count <= 0:
+    # 慢速路径：加锁保护，确保只有一个线程执行扩容
+    with _sheet_row_count_lock:
+        # 双重检查：其他线程可能已经在等待期间完成了扩容
+        cached_count = _sheet_row_count_cache.get("count", 0)
+        if cached_count >= min_row_count:
+            return True
+
+        # 先获取当前表格信息
+        url = f"{BASE_URL}/files/{FILE_ID}"
+        resp = HTTP.get(url, headers=get_headers(), timeout=30)
+        if resp.status_code != 200:
+            return False
+        data = resp.json()
+        sheets = data.get("data", {}).get("sheets", [])
+        current_row_count = 0
         for s in sheets:
             if s.get("sheetID") == SHEET_ID:
-                gp = s.get("gridProperties", {})
-                current_row_count = gp.get("rowCount", 0)
+                current_row_count = s.get("rowCount", 0)
                 break
+        if current_row_count <= 0:
+            for s in sheets:
+                if s.get("sheetID") == SHEET_ID:
+                    gp = s.get("gridProperties", {})
+                    current_row_count = gp.get("rowCount", 0)
+                    break
 
-    _sheet_row_count_cache["count"] = current_row_count
+        _sheet_row_count_cache["count"] = current_row_count
 
-    if current_row_count >= min_row_count:
-        return True
-
-    # 需要添加行数（每次至少加500行，避免频繁调用）
-    rows_to_add = max(500, min_row_count - current_row_count)
-    body = {
-        "requests": [{
-            "insertDimension": {
-                "range": {
-                    "sheetID": SHEET_ID,
-                    "dimension": "ROWS",
-                    "startIndex": current_row_count + 1,
-                    "endIndex": current_row_count + 1 + rows_to_add
-                }
-            }
-        }]
-    }
-    resp = batch_update(body)
-    if resp.status_code == 200:
-        result = resp.json()
-        if result.get("ret") == 0 or "responses" in result:
-            _sheet_row_count_cache["count"] = current_row_count + rows_to_add
+        if current_row_count >= min_row_count:
             return True
-    return False
+
+        # 需要添加行数（每次至少加500行，避免频繁调用）
+        rows_to_add = max(500, min_row_count - current_row_count)
+        body = {
+            "requests": [{
+                "insertDimension": {
+                    "range": {
+                        "sheetID": SHEET_ID,
+                        "dimension": "ROWS",
+                        "startIndex": current_row_count + 1,
+                        "endIndex": current_row_count + 1 + rows_to_add
+                    }
+                }
+            }]
+        }
+        resp = batch_update(body)
+        if resp.status_code == 200:
+            result = resp.json()
+            if result.get("ret") == 0 or "responses" in result:
+                _sheet_row_count_cache["count"] = current_row_count + rows_to_add
+                return True
+        return False
 
 
 def is_date_string(value):
@@ -598,8 +597,10 @@ _CALC_CACHE_TTL = 30  # 30秒缓存
 # 待处理行缓存
 _pending_row_cache = {"data": None, "timestamp": 0}
 _PENDING_ROW_CACHE_TTL = 30
-_last_empty_row_cache = {"row": 0}  # 缓存上次找到的空行号
-_sheet_row_count_cache = {"count": 0}  # 缓存表格总行数
+
+# 表格总行数缓存（带锁保护，避免多人同时触发重复扩容）
+_sheet_row_count_cache = {"count": 0}
+_sheet_row_count_lock = threading.Lock()
 
 def _get_pending_rows():
     """获取所有待处理行（F列为空的行），带缓存"""
@@ -714,10 +715,10 @@ def calculate_date():
 @require_auth
 def create_order():
     """创建订单：负责所有写入操作
-    深度优化：
-    1. 前端可传入 calculated_date，跳过重复计算（省1-2次API调用）
-    2. 并行执行：计算/行查找/ensure_sheet_rows 三任务并行
-    3. get_next_empty_row 从上次空行+1开始，连续提交0次API调用"""
+    安全优化：
+    1. 前端可传入 calculated_date，跳过重复计算
+    2. 多人并发安全：不使用全局空行缓存，每次提交独立扫描
+    3. ensure_sheet_rows 带缓存但写入前精确检查"""
     try:
         data = request.json
         model = data.get('model', '')
@@ -734,18 +735,18 @@ def create_order():
         remark = f"{tonnage}{customer}"
         submit_time = get_beijing_time_str()
 
-        # === 三任务并行：计算可发货日期 + 查找空行 + 确保行数 ===
-        calc_result = [pre_calculated_date, ""]  # [calculated_date, error_msg]
-        row_result = [None]  # [write_row_idx, serial_no]
-        ensure_result = [True]
+        # === 步骤1：并行执行计算可发货日期 + 检查目标行是否可用 ===
+        calc_result = [pre_calculated_date, ""]
+        target_row_available = [False]
+        actual_row_index = [0]  # 最终确定的写入行号（1-based）
 
         def do_calc():
             if not calc_result[0]:
                 calc_result[0], calc_result[1] = calculate_delivery_date(model, tonnage, expected_date)
 
-        def do_find_row():
+        def do_check_target():
             if row_index > 0:
-                # 检查该行A列是否为空
+                # 检查前端传来的行号是否仍为空
                 grid_data = read_sheet_range(SHEET_ID, f"A{row_index}:A{row_index}")
                 rows = grid_data.get("rows", [])
                 a_col_empty = True
@@ -758,40 +759,30 @@ def create_order():
                                 a_col_empty = False
                                 break
                 if a_col_empty:
-                    row_result[0] = (row_index - 1, str(row_index))
-                else:
-                    empty_row = get_next_empty_row(SHEET_ID)
-                    row_result[0] = (empty_row - 1, str(empty_row))
-            else:
-                empty_row = get_next_empty_row(SHEET_ID)
-                row_result[0] = (empty_row - 1, str(empty_row))
+                    target_row_available[0] = True
+                    actual_row_index[0] = row_index
 
-        def do_ensure():
-            # 先用缓存中的行数做初步判断
-            required_row = 0
-            if row_result[0]:
-                required_row = row_result[0][0] + 1
-            else:
-                # 估算：用缓存行号
-                cached = _last_empty_row_cache.get("row", 0)
-                required_row = max(cached + 1, 100)
-            ensure_result[0] = ensure_sheet_rows(required_row + 10)
-
-        with ThreadPoolExecutor(max_workers=3) as executor:
+        with ThreadPoolExecutor(max_workers=2) as executor:
             f1 = executor.submit(do_calc)
-            f2 = executor.submit(do_find_row)
-            f3 = executor.submit(do_ensure)
+            f2 = executor.submit(do_check_target)
             f1.result()
             f2.result()
-            f3.result()
 
+        # === 步骤2：如果目标行不可用，重新找空行（每次独立扫描，不依赖全局缓存）===
+        if not target_row_available[0]:
+            # 安全：从第2行开始扫描，确保找到真正的空行
+            empty_row = get_next_empty_row(SHEET_ID, start_from=2)
+            actual_row_index[0] = empty_row
+
+        write_row_idx = actual_row_index[0] - 1  # 转为0-based
+        serial_no = str(actual_row_index[0])
         calc_date_for_write = calc_result[0]
-        write_row_idx, serial_no = row_result[0]
 
-        # 如果并行中的 ensure 使用的估算行号不够，再补一次精确检查
-        required_row = write_row_idx + 1
+        # === 步骤3：确保表格有足够行数 ===
+        required_row = actual_row_index[0]
         ensure_sheet_rows(required_row + 10)
 
+        # === 步骤4：写入数据 ===
         resp = write_order_row(
             write_row_idx, model, tonnage, customer, expected_date,
             calc_date_for_write, queue_date, submitter, remark, serial_no, submitter_id, submit_time
@@ -801,8 +792,6 @@ def create_order():
         if "responses" in result:
             updated = result["responses"][0].get("updateRangeResponse", {}).get("updatedCells", 0)
             if updated > 0:
-                # 更新空行缓存为当前写入行的下一行
-                _last_empty_row_cache["row"] = write_row_idx + 2
                 clear_order_caches()
                 return jsonify({"success": True, "message": "订单创建成功"})
             return jsonify({"success": False, "error": "写入0个单元格"})
@@ -822,7 +811,7 @@ CACHE_TTL = 120  # 缓存120秒，减少API调用频率
 
 def clear_order_caches():
     """清空订单相关缓存，确保增删改后页面重新读取腾讯表最新数据
-    注意：不清空 _last_empty_row_cache（提交后空行号只会前进）和 _sheet_row_count_cache"""
+    注意：不清空 _sheet_row_count_cache，因为写入行不会减少表格总行数"""
     _orders_cache["data"] = None
     _orders_cache["timestamp"] = 0
     _filtered_cache.clear()
