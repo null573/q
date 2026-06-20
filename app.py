@@ -714,11 +714,12 @@ def calculate_date():
 @app.route('/api/orders', methods=['POST'])
 @require_auth
 def create_order():
-    """创建订单：负责所有写入操作
-    安全优化：
-    1. 前端可传入 calculated_date，跳过重复计算
-    2. 多人并发安全：不使用全局空行缓存，每次提交独立扫描
-    3. ensure_sheet_rows 带缓存但写入前精确检查"""
+    """创建订单：极致优化版
+    前端已传入 calculated_date + row_index（目标空行号），后端只需：
+    1. 验证目标行是否仍为空（1次API调用）
+    2. 确保行数足够（缓存命中时0次）
+    3. 写入数据（1次API调用）
+    最快路径：2次API调用，无扫描"""
     try:
         data = request.json
         model = data.get('model', '')
@@ -729,60 +730,67 @@ def create_order():
         submitter = data.get('submitter', '未知用户')
         submitter_id = data.get('submitter_id', '')
         row_index = data.get('row_index', 0)  # 1-based，由calculate_date返回
-        # 优化：前端可传入已计算好的可发货日期，避免重复计算
         pre_calculated_date = data.get('calculated_date', '')
 
         remark = f"{tonnage}{customer}"
         submit_time = get_beijing_time_str()
 
-        # === 步骤1：并行执行计算可发货日期 + 检查目标行是否可用 ===
-        calc_result = [pre_calculated_date, ""]
-        target_row_available = [False]
-        actual_row_index = [0]  # 最终确定的写入行号（1-based）
+        # === 快速路径：前端已传入目标行号，直接验证并写入 ===
+        if row_index > 0:
+            # 步骤1：检查目标行A列是否为空（1次API调用）
+            grid_data = read_sheet_range(SHEET_ID, f"A{row_index}:A{row_index}")
+            rows = grid_data.get("rows", [])
+            a_col_empty = True
+            if rows and len(rows) > 0:
+                for v in rows[0].get("values", []):
+                    cv = v.get("cellValue")
+                    if cv:
+                        text = parse_cell_value(cv)
+                        if text.strip():
+                            a_col_empty = False
+                            break
 
-        def do_calc():
-            if not calc_result[0]:
-                calc_result[0], calc_result[1] = calculate_delivery_date(model, tonnage, expected_date)
+            if a_col_empty:
+                # 目标行可用，直接写入
+                write_row_idx = row_index - 1
+                serial_no = str(row_index)
+                calc_date_for_write = pre_calculated_date
 
-        def do_check_target():
-            if row_index > 0:
-                # 检查前端传来的行号是否仍为空
-                grid_data = read_sheet_range(SHEET_ID, f"A{row_index}:A{row_index}")
-                rows = grid_data.get("rows", [])
-                a_col_empty = True
-                if rows and len(rows) > 0:
-                    for v in rows[0].get("values", []):
-                        cv = v.get("cellValue")
-                        if cv:
-                            text = parse_cell_value(cv)
-                            if text.strip():
-                                a_col_empty = False
-                                break
-                if a_col_empty:
-                    target_row_available[0] = True
-                    actual_row_index[0] = row_index
+                # 确保行数足够（缓存命中时0次API调用）
+                ensure_sheet_rows(row_index + 10)
 
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            f1 = executor.submit(do_calc)
-            f2 = executor.submit(do_check_target)
-            f1.result()
-            f2.result()
+                # 写入数据（1次API调用）
+                resp = write_order_row(
+                    write_row_idx, model, tonnage, customer, expected_date,
+                    calc_date_for_write, queue_date, submitter, remark, serial_no, submitter_id, submit_time
+                )
+                result = resp.json()
 
-        # === 步骤2：如果目标行不可用，重新找空行（每次独立扫描，不依赖全局缓存）===
-        if not target_row_available[0]:
-            # 安全：从第2行开始扫描，确保找到真正的空行
-            empty_row = get_next_empty_row(SHEET_ID, start_from=2)
-            actual_row_index[0] = empty_row
+                if "responses" in result:
+                    updated = result["responses"][0].get("updateRangeResponse", {}).get("updatedCells", 0)
+                    if updated > 0:
+                        clear_order_caches()
+                        return jsonify({"success": True, "message": "订单创建成功"})
+                    return jsonify({"success": False, "error": "写入0个单元格"})
+                else:
+                    err_str = json.dumps(result, ensure_ascii=False)
+                    return jsonify({"success": False, "error": err_str})
 
-        write_row_idx = actual_row_index[0] - 1  # 转为0-based
-        serial_no = str(actual_row_index[0])
-        calc_date_for_write = calc_result[0]
+        # === 降级路径：目标行不可用或未提供，需要扫描找空行 ===
+        # 如果没有 pre_calculated_date，先计算
+        calc_date_for_write = pre_calculated_date
+        if not calc_date_for_write:
+            calc_date_for_write, _ = calculate_delivery_date(model, tonnage, expected_date)
 
-        # === 步骤3：确保表格有足够行数 ===
-        required_row = actual_row_index[0]
-        ensure_sheet_rows(required_row + 10)
+        # 扫描找空行
+        empty_row = get_next_empty_row(SHEET_ID, start_from=2)
+        write_row_idx = empty_row - 1
+        serial_no = str(empty_row)
 
-        # === 步骤4：写入数据 ===
+        # 确保行数足够
+        ensure_sheet_rows(empty_row + 10)
+
+        # 写入数据
         resp = write_order_row(
             write_row_idx, model, tonnage, customer, expected_date,
             calc_date_for_write, queue_date, submitter, remark, serial_no, submitter_id, submit_time
