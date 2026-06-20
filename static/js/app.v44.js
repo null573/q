@@ -681,14 +681,15 @@ async function loadOrders(page = 1, forceRefresh = false, options = {}) {
         if (requestSeq !== ordersRequestSeq) return;
         if (data.success) {
             const newOrders = (data.orders || []).filter(order => !isRecentlyDeletedOrder(order));
-            // 保存到对应viewMode的缓存
-            if (viewMode === 'mine') {
+            // 保存到对应viewMode的缓存（使用请求时的viewMode，不用后端返回值覆盖）
+            const requestViewMode = viewMode;
+            if (requestViewMode === 'mine') {
                 cachedMineOrders = newOrders;
             } else {
                 cachedAllOrders = newOrders;
             }
             // 如果API返回空但对应缓存有数据，使用对应缓存（降级显示）
-            const cachedOrders = viewMode === 'mine' ? cachedMineOrders : cachedAllOrders;
+            const cachedOrders = requestViewMode === 'mine' ? cachedMineOrders : cachedAllOrders;
             if (newOrders.length === 0 && cachedOrders.length > 0) {
                 console.warn('[loadOrders] API返回空，使用' + viewMode + '缓存数据');
                 allOrders = cachedOrders;
@@ -701,7 +702,8 @@ async function loadOrders(page = 1, forceRefresh = false, options = {}) {
             isAdmin = data.is_admin;
             isManager = data.access_level === 'department';
             accessLevel = data.access_level || 'self';
-            viewMode = data.view_mode;
+            // 注意：不覆盖 viewMode，保持前端用户选择
+            // viewMode = data.view_mode;
             renderOrders(allOrders);
             renderPagination();
             renderAdminFilter();

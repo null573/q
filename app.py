@@ -1003,15 +1003,20 @@ def get_order_submitter_user(order):
 
 
 def can_operate_order(order, current_user, submitter_id, submitter_name, view_mode="mine"):
-    """按用户表权限判断是否可查看/操作订单"""
+    """按用户表权限判断是否可查看/操作订单
+    安全：当 view_mode='all' 且用户信息获取失败时，默认允许查看（降级为全部可见）"""
     access_level = (current_user or {}).get("access_level", "self")
     if view_mode == "mine":
         return is_same_submitter(order, submitter_id, submitter_name)
     if access_level == "admin":
         return True
-    # 经理和业务员在全部排队模式下，可查看本部门订单
+    # view_mode="all" 但用户信息不完整时（access_level="self"且无部门信息），
+    # 降级为全部可见，避免全部排队显示为空
     if access_level in ("department", "self"):
         current_dept = str((current_user or {}).get("department", "")).strip()
+        if not current_dept:
+            # 用户信息不完整，降级为全部可见
+            return True
         order_user = get_order_submitter_user(order)
         order_dept = str((order_user or {}).get("department", "")).strip()
         return bool(current_dept and order_dept and current_dept == order_dept)
