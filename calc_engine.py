@@ -11,6 +11,9 @@ import requests
 BASE_URL = "https://docs.qq.com/openapi/spreadsheet/v3"
 FILE_ID = "DRnhDemRIS25mdnFF"
 HTTP = requests.Session()
+adapter = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=20, max_retries=2)
+HTTP.mount('https://', adapter)
+HTTP.mount('http://', adapter)
 
 # 型号 -> (工作表sheetId, 日期列起始行, 产能列字母, 上限日期单元格, 数据行数)
 MODEL_CONFIG = {
@@ -112,7 +115,7 @@ CACHE_TTL = 60  # 60秒缓存，平衡速度和数据实时性
 
 
 def get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count):
-    """获取工作表数据，带缓存。优化：一次性读取日期列+产能列，减少API调用"""
+    """获取工作表数据，带缓存。优化：一次性读取日期列+产能列+上限日期，减少API调用"""
     cache_key = f"{sheet_id}:{start_row}:{capacity_col}:{limit_cell}"
 
     # 检查缓存
@@ -122,19 +125,7 @@ def get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count):
         if time.time() - cached_time < CACHE_TTL:
             return cached_data
 
-    # 优化：一次性读取A列（日期）和产能列（如J列）
-    # 构建范围如 A6:J184，这样一次API调用获取所有需要的数据
-    end_row = start_row + row_count - 1
-    range_str = f"A{start_row}:{capacity_col}{end_row}"
-    grid_data = read_sheet_range(sheet_id, range_str)
-    rows = grid_data.get("rows", [])
-
-    # 解析数据：A列是日期，最后一列是产能
-    date_capacity_map = {}
-    capacity_col_index = -1  # 产能列在返回数据中的索引
-
     # 确定产能列的索引（根据列字母计算）
-    # A=0, B=1, ..., Z=25, AA=26, AB=27, ...
     def col_letter_to_index(col):
         result = 0
         for c in col:
@@ -142,6 +133,15 @@ def get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count):
         return result - 1
 
     capacity_col_index = col_letter_to_index(capacity_col)
+
+    # 优化：一次性读取A列（日期）和产能列（如J列）
+    end_row = start_row + row_count - 1
+    range_str = f"A{start_row}:{capacity_col}{end_row}"
+    grid_data = read_sheet_range(sheet_id, range_str)
+    rows = grid_data.get("rows", [])
+
+    # 解析数据：A列是日期，最后一列是产能
+    date_capacity_map = {}
 
     for i, row in enumerate(rows):
         values = row.get("values", [])
@@ -169,9 +169,29 @@ def get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count):
             if d:
                 date_capacity_map[d] = cap_val
 
-    # 读取上限日期
-    limit_date_str = read_single_cell(sheet_id, limit_cell)
-    limit_date = parse_date(limit_date_str)
+    # 优化：上限日期从已读取的数据中提取（如果 limit_cell 在读取范围内）
+    # 解析 limit_cell 如 "M1" -> col=M, row=1
+    import re
+    limit_match = re.match(r'^([A-Z]+)(\d+)$', limit_cell)
+    limit_date = None
+    if limit_match:
+        limit_col_letter = limit_match.group(1)
+        limit_row_num = int(limit_match.group(2))
+        limit_col_idx = col_letter_to_index(limit_col_letter)
+        # 检查上限日期单元格是否在已读取的范围内
+        if limit_row_num >= start_row and limit_row_num <= end_row and limit_col_idx <= capacity_col_index:
+            row_offset = limit_row_num - start_row
+            if row_offset < len(rows):
+                row_vals = rows[row_offset].get("values", [])
+                if len(row_vals) > limit_col_idx:
+                    cv = row_vals[limit_col_idx].get("cellValue")
+                    if cv:
+                        limit_date = parse_date(parse_cell_value(cv))
+
+    # 如果上限日期不在读取范围内，再单独读取
+    if limit_date is None:
+        limit_date_str = read_single_cell(sheet_id, limit_cell)
+        limit_date = parse_date(limit_date_str)
 
     result = {
         "date_capacity_map": date_capacity_map,
