@@ -420,6 +420,53 @@ def batch_update(requests_body):
     return resp
 
 
+def ensure_sheet_rows(min_row_count):
+    """确保表格至少有 min_row_count 行，不足时自动添加行（每次批量添加500行）"""
+    # 先获取当前表格信息
+    url = f"{BASE_URL}/files/{FILE_ID}"
+    resp = HTTP.get(url, headers=get_headers(), timeout=30)
+    if resp.status_code != 200:
+        return False
+    data = resp.json()
+    sheets = data.get("data", {}).get("sheets", [])
+    current_row_count = 0
+    for s in sheets:
+        if s.get("sheetID") == SHEET_ID:
+            current_row_count = s.get("rowCount", 0)
+            break
+    if current_row_count <= 0:
+        # 备用：从 gridProperties 读取
+        for s in sheets:
+            if s.get("sheetID") == SHEET_ID:
+                gp = s.get("gridProperties", {})
+                current_row_count = gp.get("rowCount", 0)
+                break
+
+    if current_row_count >= min_row_count:
+        return True
+
+    # 需要添加行数（每次至少加500行，避免频繁调用）
+    rows_to_add = max(500, min_row_count - current_row_count)
+    body = {
+        "requests": [{
+            "insertDimension": {
+                "range": {
+                    "sheetID": SHEET_ID,
+                    "dimension": "ROWS",
+                    "startIndex": current_row_count + 1,
+                    "endIndex": current_row_count + 1 + rows_to_add
+                }
+            }
+        }]
+    }
+    resp = batch_update(body)
+    if resp.status_code == 200:
+        result = resp.json()
+        if result.get("ret") == 0 or "responses" in result:
+            return True
+    return False
+
+
 def is_date_string(value):
     """判断字符串是否为日期格式 YYYY-MM-DD"""
     if not value:
@@ -698,6 +745,10 @@ def create_order():
         # 计算可发货日期（用于写入E列，有缓存）
         calc_date_for_write, _ = calculate_delivery_date(model, tonnage, expected_date)
 
+        # 确保表格有足够行数，自动扩容
+        required_row = write_row_idx + 1  # 1-based
+        ensure_sheet_rows(required_row + 10)
+
         resp = write_order_row(
             write_row_idx, model, tonnage, customer, expected_date,
             calc_date_for_write, queue_date, submitter, remark, serial_no, submitter_id, submit_time
@@ -712,15 +763,10 @@ def create_order():
             return jsonify({"success": False, "error": "写入0个单元格"})
         else:
             err_str = json.dumps(result, ensure_ascii=False)
-            if "out of sheet boundaries" in err_str.lower():
-                return jsonify({"success": False, "error": "排队表已满，请联系管理员清理旧数据后重试"})
             return jsonify({"success": False, "error": err_str})
 
     except Exception as e:
-        error_msg = str(e)
-        if "out of sheet boundaries" in error_msg.lower():
-            return jsonify({"success": False, "error": "排队表已满，请联系管理员清理旧数据后重试"})
-        return jsonify({"success": False, "error": error_msg})
+        return jsonify({"success": False, "error": str(e)})
 
 
 # 全局缓存：原始订单数据（不过滤权限和日期）
