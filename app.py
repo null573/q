@@ -711,10 +711,16 @@ def create_order():
                 return jsonify({"success": True, "message": "订单创建成功"})
             return jsonify({"success": False, "error": "写入0个单元格"})
         else:
-            return jsonify({"success": False, "error": json.dumps(result, ensure_ascii=False)})
+            err_str = json.dumps(result, ensure_ascii=False)
+            if "out of sheet boundaries" in err_str.lower():
+                return jsonify({"success": False, "error": "排队表已满，请联系管理员清理旧数据后重试"})
+            return jsonify({"success": False, "error": err_str})
 
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
+        error_msg = str(e)
+        if "out of sheet boundaries" in error_msg.lower():
+            return jsonify({"success": False, "error": "排队表已满，请联系管理员清理旧数据后重试"})
+        return jsonify({"success": False, "error": error_msg})
 
 
 # 全局缓存：原始订单数据（不过滤权限和日期）
