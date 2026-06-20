@@ -383,9 +383,14 @@ def read_sheet_range(sheet_id, range_str):
 def get_next_empty_row(sheet_id):
     """获取表格下一个空行号（1-based），从A列第一个空行开始扫描（跳过表头第1行）
     使用缓存：从上次找到的空行号开始向后搜索，避免每次从第2行扫起
-    优化：增大批次到500行，减少API调用次数"""
+    优化：增大批次到500行，减少API调用次数
+    优化2：连续提交时，直接从上次空行的下一行开始（因为上次空行已被写入）"""
     cached_row = _last_empty_row_cache.get("row", 0)
-    start_search = max(2, cached_row)  # 至少从第2行开始
+    # 优化：如果上次找到了空行，它很可能已被写入，直接从下一行开始
+    if cached_row > 0:
+        start_search = cached_row + 1
+    else:
+        start_search = 2
     batch_size = 500
     for offset in range(start_search - 1, 2000, batch_size):
         start = offset + 1  # 1-based
@@ -708,8 +713,11 @@ def calculate_date():
 @app.route('/api/orders', methods=['POST'])
 @require_auth
 def create_order():
-    """创建订单：负责所有写入操作，calculate_date只计算不写入
-    优化：并行执行计算和行查找，减少串行等待"""
+    """创建订单：负责所有写入操作
+    深度优化：
+    1. 前端可传入 calculated_date，跳过重复计算（省1-2次API调用）
+    2. 并行执行：计算/行查找/ensure_sheet_rows 三任务并行
+    3. get_next_empty_row 从上次空行+1开始，连续提交0次API调用"""
     try:
         data = request.json
         model = data.get('model', '')
@@ -720,16 +728,20 @@ def create_order():
         submitter = data.get('submitter', '未知用户')
         submitter_id = data.get('submitter_id', '')
         row_index = data.get('row_index', 0)  # 1-based，由calculate_date返回
+        # 优化：前端可传入已计算好的可发货日期，避免重复计算
+        pre_calculated_date = data.get('calculated_date', '')
 
         remark = f"{tonnage}{customer}"
         submit_time = get_beijing_time_str()
 
-        # === 优化1：并行执行计算可发货日期 和 查找/验证空行 ===
-        calc_result = [None, None]  # [calculated_date, error_msg]
-        row_result = [None]         # [write_row_idx, serial_no]
+        # === 三任务并行：计算可发货日期 + 查找空行 + 确保行数 ===
+        calc_result = [pre_calculated_date, ""]  # [calculated_date, error_msg]
+        row_result = [None]  # [write_row_idx, serial_no]
+        ensure_result = [True]
 
         def do_calc():
-            calc_result[0], calc_result[1] = calculate_delivery_date(model, tonnage, expected_date)
+            if not calc_result[0]:
+                calc_result[0], calc_result[1] = calculate_delivery_date(model, tonnage, expected_date)
 
         def do_find_row():
             if row_index > 0:
@@ -754,17 +766,30 @@ def create_order():
                 empty_row = get_next_empty_row(SHEET_ID)
                 row_result[0] = (empty_row - 1, str(empty_row))
 
-        with ThreadPoolExecutor(max_workers=2) as executor:
+        def do_ensure():
+            # 先用缓存中的行数做初步判断
+            required_row = 0
+            if row_result[0]:
+                required_row = row_result[0][0] + 1
+            else:
+                # 估算：用缓存行号
+                cached = _last_empty_row_cache.get("row", 0)
+                required_row = max(cached + 1, 100)
+            ensure_result[0] = ensure_sheet_rows(required_row + 10)
+
+        with ThreadPoolExecutor(max_workers=3) as executor:
             f1 = executor.submit(do_calc)
             f2 = executor.submit(do_find_row)
-            f1.result()  # 等待两个任务都完成
+            f3 = executor.submit(do_ensure)
+            f1.result()
             f2.result()
+            f3.result()
 
         calc_date_for_write = calc_result[0]
         write_row_idx, serial_no = row_result[0]
 
-        # === 优化2：ensure_sheet_rows 带缓存，大部分情况直接跳过 ===
-        required_row = write_row_idx + 1  # 1-based
+        # 如果并行中的 ensure 使用的估算行号不够，再补一次精确检查
+        required_row = write_row_idx + 1
         ensure_sheet_rows(required_row + 10)
 
         resp = write_order_row(
@@ -776,6 +801,8 @@ def create_order():
         if "responses" in result:
             updated = result["responses"][0].get("updateRangeResponse", {}).get("updatedCells", 0)
             if updated > 0:
+                # 更新空行缓存为当前写入行的下一行
+                _last_empty_row_cache["row"] = write_row_idx + 2
                 clear_order_caches()
                 return jsonify({"success": True, "message": "订单创建成功"})
             return jsonify({"success": False, "error": "写入0个单元格"})
@@ -795,14 +822,13 @@ CACHE_TTL = 120  # 缓存120秒，减少API调用频率
 
 def clear_order_caches():
     """清空订单相关缓存，确保增删改后页面重新读取腾讯表最新数据
-    注意：不清空 _sheet_row_count_cache，因为写入行不会减少表格总行数"""
+    注意：不清空 _last_empty_row_cache（提交后空行号只会前进）和 _sheet_row_count_cache"""
     _orders_cache["data"] = None
     _orders_cache["timestamp"] = 0
     _filtered_cache.clear()
     _filtered_cache["timestamp"] = 0
     _pending_row_cache["data"] = None
     _pending_row_cache["timestamp"] = 0
-    _last_empty_row_cache["row"] = 0
 
 
 def clear_user_caches():

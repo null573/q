@@ -613,7 +613,8 @@ async function handleCreateOrder(e) {
         queue_date: queueDate,
         submitter: currentUser.name,
         submitter_id: currentUser.id,
-        row_index: pendingRowIndex // 如果有预计算行号，则更新该行
+        row_index: pendingRowIndex, // 如果有预计算行号，则更新该行
+        calculated_date: document.getElementById('calculatedDate').value || '' // 传入已计算的可发货日期，避免后端重复计算
     };
 
     try {
