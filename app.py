@@ -9,11 +9,14 @@ import functools
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from calc_engine import MODEL_CONFIG, calculate_delivery_date
+from calc_engine import MODEL_CONFIG, calculate_delivery_date, set_token_getter
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
 CORS(app)
+
+# 将token获取函数注入calc_engine，确保计算引擎使用与管理员缓存同步的token
+set_token_getter(lambda: get_admin_secret("TENCENT_ACCESS_TOKEN") or ACCESS_TOKEN)
 
 # 腾讯表格配置（正式排队表格）
 FILE_ID = "DRnhDemRIS25mdnFF"

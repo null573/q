@@ -15,6 +15,39 @@ adapter = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=20, ma
 HTTP.mount('https://', adapter)
 HTTP.mount('http://', adapter)
 
+# 外部注入的token获取函数（由app.py设置，确保与管理员缓存同步）
+_token_getter = None
+
+
+def set_token_getter(fn):
+    """设置外部token获取函数，由app.py调用以同步管理员缓存的token"""
+    global _token_getter
+    _token_getter = fn
+
+
+def get_headers():
+    """获取腾讯表格API请求头
+    优先使用外部注入的token获取函数（与管理员缓存同步），
+    fallback到环境变量"""
+    if _token_getter:
+        token = _token_getter()
+        if token:
+            return {
+                "Content-Type": "application/json",
+                "Access-Token": token,
+                "Open-Id": os.environ.get("TENCENT_OPEN_ID", os.environ.get("OPEN_ID", "9bc172e5338147d8a35c1438ea8d1577")),
+                "Client-Id": os.environ.get("TENCENT_CLIENT_ID", os.environ.get("CLIENT_ID", "da815d1227294457b43413bdc16e3e90"))
+            }
+    token = os.environ.get("TENCENT_ACCESS_TOKEN", "")
+    if not token:
+        token = os.environ.get("ACCESS_TOKEN", "")
+    return {
+        "Content-Type": "application/json",
+        "Access-Token": token,
+        "Open-Id": os.environ.get("TENCENT_OPEN_ID", os.environ.get("OPEN_ID", "9bc172e5338147d8a35c1438ea8d1577")),
+        "Client-Id": os.environ.get("TENCENT_CLIENT_ID", os.environ.get("CLIENT_ID", "da815d1227294457b43413bdc16e3e90"))
+    }
+
 # 型号 -> (工作表sheetId, 日期列起始行, 产能列字母, 上限日期单元格, 数据行数)
 MODEL_CONFIG = {
     "F5631":  ("000005", 6, "J", "M1", 179),
@@ -45,21 +78,6 @@ MODEL_CONFIG = {
     "8001A":  ("000009", 3, "Q", "O1", 241),
     "INOVOL R8315": ("000004", 3, "AB", "AP1", 180),
 }
-
-
-def get_headers():
-    """获取腾讯表格API请求头
-    兼容主服务环境变量命名：优先TENCENT_ACCESS_TOKEN，fallback到ACCESS_TOKEN"""
-    import os
-    token = os.environ.get("TENCENT_ACCESS_TOKEN", "")
-    if not token:
-        token = os.environ.get("ACCESS_TOKEN", "")
-    return {
-        "Content-Type": "application/json",
-        "Access-Token": token,
-        "Open-Id": os.environ.get("TENCENT_OPEN_ID", os.environ.get("OPEN_ID", "9bc172e5338147d8a35c1438ea8d1577")),
-        "Client-Id": os.environ.get("TENCENT_CLIENT_ID", os.environ.get("CLIENT_ID", "da815d1227294457b43413bdc16e3e90"))
-    }
 
 
 def parse_cell_value(cell_value):
