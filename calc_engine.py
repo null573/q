@@ -99,11 +99,46 @@ def read_single_cell(sheet_id, cell):
 
 
 def parse_date(date_str):
-    """解析日期字符串为date对象"""
-    try:
-        return datetime.strptime(str(date_str).strip(), "%Y-%m-%d").date()
-    except:
+    """解析日期字符串为date对象
+    支持格式: YYYY-MM-DD, YYYY/MM/DD, YYYY年MM月DD日, MM月DD日(默认当年)"""
+    s = str(date_str).strip()
+    if not s:
         return None
+    from datetime import date
+    import re
+
+    # 1. 标准格式 YYYY-MM-DD / YYYY/MM/DD
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            pass
+
+    # 2. 中文格式: YYYY年MM月DD日
+    m = re.match(r'^(\d{4})年(\d{1,2})月(\d{1,2})日$', s)
+    if m:
+        try:
+            return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            pass
+
+    # 3. 中文格式: MM月DD日 (默认当年)
+    m = re.match(r'^(\d{1,2})月(\d{1,2})日$', s)
+    if m:
+        try:
+            return date(date.today().year, int(m.group(1)), int(m.group(2)))
+        except ValueError:
+            pass
+
+    # 4. 纯数字: MMDD 或 M.D (如 6.30)
+    m = re.match(r'^(\d{1,2})\.(\d{1,2})$', s)
+    if m:
+        try:
+            return date(date.today().year, int(m.group(1)), int(m.group(2)))
+        except ValueError:
+            pass
+
+    return None
 
 
 def parse_number(val):
