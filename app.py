@@ -9,7 +9,7 @@ import functools
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from calc_engine import MODEL_CONFIG, calculate_delivery_date, set_token_getter
+from calc_engine import MODEL_CONFIG, calculate_delivery_date, set_token_getter, parse_date, parse_number
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
@@ -674,7 +674,7 @@ def _get_pending_rows():
 @app.route('/api/calculate-date', methods=['POST'])
 @require_auth
 def calculate_date():
-    """计算可发货日期：只计算不写入，带缓存加速"""
+    """计算可发货日期：只计算不写入，带缓存加速，扣减已有订单占用产能"""
     try:
         data = request.json
         model = data.get('model', '')
@@ -693,14 +693,33 @@ def calculate_date():
             calculated_date = _calc_result_cache["result"]
             error_msg = _calc_result_cache.get("error", "")
         else:
-            # 使用本地计算引擎计算可发货日期
-            calculated_date, error_msg = calculate_delivery_date(model, tonnage, expected_date)
+            # 2. 计算同型号已有订单的已占用产能（按排队日期汇总吨位）
+            occupied_capacity = {}
+            try:
+                all_orders = fetch_all_orders_raw()
+                for order in all_orders:
+                    order_model = str(order.get("model", "")).strip()
+                    if order_model != model:
+                        continue
+                    queue_date_str = str(order.get("queue_date", "")).strip()
+                    if not queue_date_str:
+                        continue
+                    queue_date = parse_date(queue_date_str)
+                    if queue_date:
+                        order_tonnage = parse_number(order.get("tonnage", "0"))
+                        if order_tonnage and order_tonnage > 0:
+                            occupied_capacity[queue_date] = occupied_capacity.get(queue_date, 0) + order_tonnage
+            except Exception:
+                pass  # 获取订单失败时降级为不扣减
+
+            # 3. 使用本地计算引擎计算可发货日期（传入已占用产能）
+            calculated_date, error_msg = calculate_delivery_date(model, tonnage, expected_date, occupied_capacity)
             _calc_result_cache["key"] = cache_key
             _calc_result_cache["result"] = calculated_date
             _calc_result_cache["error"] = error_msg
             _calc_result_cache["timestamp"] = now
 
-        # 2. 查找是否已有该型号的待处理行（使用缓存）
+        # 4. 查找是否已有该型号的待处理行（使用缓存）
         target_row = 0
         if pending_row_index > 0:
             target_row = pending_row_index
