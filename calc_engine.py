@@ -49,13 +49,16 @@ MODEL_CONFIG = {
 
 def get_headers():
     """获取腾讯表格API请求头
-    优先从环境变量读取，避免硬编码token过期"""
+    兼容主服务环境变量命名：优先TENCENT_ACCESS_TOKEN，fallback到ACCESS_TOKEN"""
     import os
+    token = os.environ.get("TENCENT_ACCESS_TOKEN", "")
+    if not token:
+        token = os.environ.get("ACCESS_TOKEN", "")
     return {
         "Content-Type": "application/json",
-        "Access-Token": os.environ.get("TENCENT_ACCESS_TOKEN", ""),
-        "Open-Id": os.environ.get("TENCENT_OPEN_ID", "9bc172e5338147d8a35c1438ea8d1577"),
-        "Client-Id": os.environ.get("TENCENT_CLIENT_ID", "da815d1227294457b43413bdc16e3e90")
+        "Access-Token": token,
+        "Open-Id": os.environ.get("TENCENT_OPEN_ID", os.environ.get("OPEN_ID", "9bc172e5338147d8a35c1438ea8d1577")),
+        "Client-Id": os.environ.get("TENCENT_CLIENT_ID", os.environ.get("CLIENT_ID", "da815d1227294457b43413bdc16e3e90"))
     }
 
 
