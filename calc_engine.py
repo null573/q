@@ -346,8 +346,11 @@ def calculate_delivery_date(model, tonnage_str, expected_date_str):
     if not date_capacity_map:
         return "请联系商务支持", "工作表数据为空"
 
+    # 如果上限日期未设置，自动使用产能表中的最大日期
     if limit_date is None:
-        return "请联系商务支持", "上限日期未设置"
+        limit_date = max(date_capacity_map.keys())
+        if not limit_date:
+            return "请联系商务支持", "上限日期未设置"
 
     # 6. 公式逻辑：
     #    筛选日期在 [expected_date, limit_date] 范围内的行
@@ -365,7 +368,8 @@ def calculate_delivery_date(model, tonnage_str, expected_date_str):
                 low_cap_dates.append(d)
 
     if not filtered_caps:
-        return "请联系商务支持", "期望日期超出可排产范围"
+        max_data_date = max(date_capacity_map.keys())
+        return "请联系商务支持", f"排产数据只到{max_data_date.strftime('%m月%d日')}，期望日期{expected_date_str}超出范围"
 
     # 检查产能最小值是否 >= 吨位
     if min(filtered_caps) >= tonnage:
