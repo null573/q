@@ -502,7 +502,7 @@ async function calculateDate() {
         const response = await apiFetch(`${API_BASE}/api/calculate-date`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model, tonnage, customer, expected_date: expectedDate, pending_row_index: pendingRowIndex, submitter_id: currentUser.id })
+            body: JSON.stringify({ model, tonnage, customer, expected_date: expectedDate, pending_row_index: pendingRowIndex, submitter_id: currentUser.id, force_refresh: true })
         });
         const data = await response.json();
         

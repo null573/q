@@ -678,19 +678,23 @@ def calculate_date():
         tonnage = data.get('tonnage', '')
         expected_date = data.get('expected_date', '')
         pending_row_index = data.get('pending_row_index', 0)
+        force_refresh = data.get('force_refresh', False)
 
-        # 1. 检查计算结果缓存
+        # 1. 检查计算结果缓存（支持强制刷新）
         import time
         now = time.time()
         cache_key = f"{model}:{tonnage}:{expected_date}"
-        if (_calc_result_cache["key"] == cache_key and
+        if (not force_refresh and
+            _calc_result_cache["key"] == cache_key and
             (now - _calc_result_cache["timestamp"]) < _CALC_CACHE_TTL):
             calculated_date = _calc_result_cache["result"]
+            error_msg = _calc_result_cache.get("error", "")
         else:
             # 使用本地计算引擎计算可发货日期
             calculated_date, error_msg = calculate_delivery_date(model, tonnage, expected_date)
             _calc_result_cache["key"] = cache_key
             _calc_result_cache["result"] = calculated_date
+            _calc_result_cache["error"] = error_msg
             _calc_result_cache["timestamp"] = now
 
         # 2. 查找是否已有该型号的待处理行（使用缓存）
@@ -705,7 +709,8 @@ def calculate_date():
         return jsonify({
             "success": True,
             "calculated_date": calculated_date,
-            "row_index": target_row
+            "row_index": target_row,
+            "message": error_msg
         })
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
