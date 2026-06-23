@@ -599,7 +599,7 @@ _CALC_CACHE_TTL = 30  # 30秒缓存
 
 # 待处理行缓存
 _pending_row_cache = {"data": None, "timestamp": 0}
-_PENDING_ROW_CACHE_TTL = 30
+_PENDING_ROW_CACHE_TTL = 300
 
 # 表格总行数缓存（带锁保护，避免多人同时触发重复扩容）
 _sheet_row_count_cache = {"count": 0}
@@ -1680,6 +1680,12 @@ def _warmup_keepalive():
                 fetch_all_orders_raw()
                 if _orders_cache["data"] and len(_orders_cache["data"]) > 0:
                     print(f"[warmup] 初始缓存建立成功: {len(_orders_cache['data'])}条")
+                    # 同时预热pending rows缓存
+                    try:
+                        _get_pending_rows()
+                        print(f"[warmup] pending rows缓存建立成功")
+                    except:
+                        pass
                     break
             except Exception as e:
                 print(f"[warmup] 初始预热失败(attempt {attempt+1}): {e}")
