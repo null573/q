@@ -261,6 +261,17 @@ def get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count):
     grid_data = read_sheet_range(sheet_id, range_str)
     rows = grid_data.get("rows", [])
 
+    # DEBUG: 记录读取详情
+    debug_info = {
+        "range": range_str,
+        "requested_rows": row_count,
+        "returned_rows": len(rows),
+        "capacity_col_index": capacity_col_index,
+        "first_few_dates": [],
+        "last_few_dates": [],
+        "skipped_rows": 0
+    }
+
     # 提取日期（A列）和产能列
     # 同时更新A列缓存（同sheet多个型号共享）
     date_col_cache_key = f"{sheet_id}:{start_row}"
@@ -268,10 +279,13 @@ def get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count):
 
     date_capacity_map = {}
 
-    for row in rows:
+    for i, row in enumerate(rows):
         values = row.get("values", [])
         if len(values) < capacity_col_index + 1:
             dates_cached.append(None)
+            debug_info["skipped_rows"] += 1
+            if i < 5:
+                debug_info["first_few_dates"].append(f"row{i}:values_len={len(values)}")
             continue
 
         # A列日期
@@ -280,8 +294,13 @@ def get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count):
             date_val = parse_cell_value(cv)
             d = parse_date(date_val)
             dates_cached.append(d)
+            if i < 5:
+                debug_info["first_few_dates"].append(f"row{i}:{date_val}->{d}")
+            if i >= len(rows) - 5:
+                debug_info["last_few_dates"].append(f"row{i}:{date_val}->{d}")
         else:
             dates_cached.append(None)
+            debug_info["skipped_rows"] += 1
             continue
 
         # 产能列
@@ -292,6 +311,9 @@ def get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count):
         cap_val = parse_number(cap_str)
         if cap_val is not None:
             date_capacity_map[d] = cap_val
+
+    # DEBUG: 打印调试信息
+    print(f"[DEBUG get_sheet_data] sheet={sheet_id} model={cache_key} {debug_info}", flush=True)
 
     # 更新A列缓存
     _date_col_cache[date_col_cache_key] = (dates_cached, now)
