@@ -1,4 +1,4 @@
-﻿from flask import Flask, render_template, request, jsonify, abort
+﻿﻿from flask import Flask, render_template, request, jsonify, abort
 from flask_cors import CORS
 import requests
 import json
@@ -543,27 +543,30 @@ def read_calculated_date_from_row(row_index_1based):
 
 
 def clear_temp_row(row_index_1based):
-    """清空临时写入的行（保留E列公式，只清空A/B/D列）"""
+    """清空临时写入的行（只清空A/B/D列，不动E列公式）"""
     if row_index_1based < 2:
         return
-    row_values = [
-        build_cell_value(""),   # A: 型号
-        build_cell_value(""),   # B: 吨位
-        build_cell_value(""),   # C: 客户
-        build_cell_value(""),   # D: 期望发货日期
-    ]
-    body = {
-        "requests": [{
+    requests = [
+        # 清空A-D列
+        {
             "updateRangeRequest": {
                 "sheetId": SHEET_ID,
                 "gridData": {
                     "startRow": row_index_1based - 1,
                     "startColumn": 0,
-                    "rows": [{"values": row_values}]
+                    "rows": [{
+                        "values": [
+                            build_cell_value(""),   # A: 型号
+                            build_cell_value(""),   # B: 吨位
+                            build_cell_value(""),   # C: 客户
+                            build_cell_value(""),   # D: 期望发货日期
+                        ]
+                    }]
                 }
             }
-        }]
-    }
+        }
+    ]
+    body = {"requests": requests}
     return batch_update(body)
 
 
@@ -622,23 +625,35 @@ def write_order_row(row_index_0based, model, tonnage, customer, expected_date, c
 
 
 def delete_row(row_index_1based):
-    """清空一行内容（row_index_1based从1开始），不删除物理行，避免下面订单行号上移"""
+    """软删除订单：仅清空吨位（B列），J列写入DELETED标识，保留其他数据"""
     if row_index_1based < 2:
         raise ValueError("无效行号，不能删除表头或不存在的行")
 
-    empty_values = [build_cell_value("") for _ in range(12)]
-    body = {
-        "requests": [{
+    requests = [
+        # B列：清空吨位
+        {
             "updateRangeRequest": {
                 "sheetId": SHEET_ID,
                 "gridData": {
                     "startRow": row_index_1based - 1,
-                    "startColumn": 0,
-                    "rows": [{"values": empty_values}]
+                    "startColumn": 1,  # B列
+                    "rows": [{"values": [build_cell_value("")]}]
                 }
             }
-        }]
-    }
+        },
+        # J列：写入DELETED标识
+        {
+            "updateRangeRequest": {
+                "sheetId": SHEET_ID,
+                "gridData": {
+                    "startRow": row_index_1based - 1,
+                    "startColumn": 9,  # J列
+                    "rows": [{"values": [build_cell_value("DELETED")]}]
+                }
+            }
+        }
+    ]
+    body = {"requests": requests}
     return batch_update(body)
 
 
@@ -1077,6 +1092,10 @@ def fetch_all_orders_raw():
 
             row_data = [get_col(j) for j in range(12)]
             if not row_data[0]:
+                continue
+
+            # 过滤已删除的行（J列=DELETED）
+            if row_data[9] and row_data[9].strip().upper() == "DELETED":
                 continue
 
             orders.append({
@@ -2123,4 +2142,5 @@ def save_model_config():
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
+
 

@@ -1,4 +1,4 @@
-﻿let currentUser = { name: '用户', id: '' };
+﻿﻿let currentUser = { name: '用户', id: '' };
 let allOrders = [];
 let cachedMineOrders = [];  // 我的排队缓存
 let cachedAllOrders = [];   // 全部排队缓存
@@ -1415,26 +1415,12 @@ window.addEventListener('beforeunload', function(e) {
     }
 });
 
-// 系统内切换标签页（订单排队/排队明细/问题反馈）：立即清空临时行
-// 通过监听tab切换按钮点击事件
+// 系统内切换标签页（订单排队/排队明细/问题反馈）：不清空临时行
+// 只在提交成功或页面关闭/刷新时才清空
+// 切换标签页后返回，继续在同一临时行操作
 function setupTabSwitchCleanup() {
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.addEventListener('click', function() {
-            if (hasUnsavedOrder() && pendingRowIndex > 0) {
-                // 异步清空临时行
-                fetch(`${API_BASE}/api/clear-temp-row`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Access-Password': accessPassword,
-                        'X-Employee-Id': employeeId
-                    },
-                    body: JSON.stringify({ row_index: pendingRowIndex })
-                }).catch(() => {});
-                pendingRowIndex = 0;
-            }
-        });
-    });
+    // 不再在标签页切换时清空临时行
+    // pendingRowIndex 保持不变，用户返回后继续在同一行操作
 }
 
 // 页面可见性变化时（切换浏览器窗口/标签页）：5分钟后清空
@@ -1647,6 +1633,7 @@ async function adminHealthCheck() {
         bar.style.display = 'none';
     }
 }
+
 
 
 
