@@ -399,7 +399,9 @@ function setupModelSearch() {
         input.value = modelName;
         hidden.value = modelName;
         closeDropdown();
+        // 同时触发modelInput和hidden model的change事件，确保calculateDate能获取最新型号
         input.dispatchEvent(new Event('change', { bubbles: true }));
+        hidden.dispatchEvent(new Event('change', { bubbles: true }));
     }
 
     function closeDropdown() {

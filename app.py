@@ -749,11 +749,14 @@ def calculate_date():
         # 清理超时的临时行
         _cleanup_expired_temp_rows()
 
-        # 1. 确定目标行：优先使用前端传入的pending_row_index，否则查找该用户+型号的临时行，或找空行
+        # 1. 确定目标行：始终复用同一行（只要没提交）
+        # 优先使用前端传入的pending_row_index（当前正在编辑的行）
+        # 如果前端没有传入，查找该用户的临时行（不区分型号，因为用户可能在修改型号）
         target_row = 0
         temp_key = f"{submitter_id}:{model}"
 
         if pending_row_index > 0:
+            # 前端传入了当前行号，直接使用（用户正在编辑这一行）
             target_row = pending_row_index
         else:
             # 检查是否已有该用户+型号的临时行
@@ -763,7 +766,7 @@ def calculate_date():
                     if now - tracked["timestamp"] < _TEMP_ROW_TIMEOUT:
                         target_row = tracked["row_index"]
 
-        # 如果没有找到临时行，找空行
+        # 如果没有找到行，找空行
         if target_row == 0:
             target_row = get_next_empty_row(SHEET_ID, start_from=2)
             ensure_sheet_rows(target_row + 10)
