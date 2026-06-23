@@ -1,4 +1,4 @@
-﻿﻿from flask import Flask, render_template, request, jsonify, abort
+from flask import Flask, render_template, request, jsonify, abort
 from flask_cors import CORS
 import requests
 import json
