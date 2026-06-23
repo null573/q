@@ -1612,18 +1612,21 @@ def debug_capacity():
     
     # 测试1: 只读取 AG:AJ 列（小范围，4列），看公式是否能计算
     small_range = f"AG{start_row}:AJ{end_row}"
-    small_data = read_sheet_range(sheet_id, small_range)
-    small_rows = small_data.get("rows", [])
+    small_resp = read_sheet_range(sheet_id, small_range)
+    small_rows_count = len(small_resp.get("rows", []))
     
     # 测试2: 读取 AG:AJ 列但只取 6月21日之后的行 (row 24 onwards)
     jun21_start = start_row + 20  # 6月21日大约在 row 24
     jun21_range = f"AG{jun21_start}:AJ{end_row}"
-    jun21_data = read_sheet_range(sheet_id, jun21_range)
-    jun21_rows = jun21_data.get("rows", [])
+    jun21_resp = read_sheet_range(sheet_id, jun21_range)
+    jun21_rows_count = len(jun21_resp.get("rows", []))
     
     # 测试3: 读取单行 AJ27 看公式值
-    single_cell = read_sheet_range(sheet_id, "AJ27:AJ27")
-    single_rows = single_cell.get("rows", [])
+    single_resp = read_sheet_range(sheet_id, "AJ27:AJ27")
+    single_rows_count = len(single_resp.get("rows", []))
+    
+    # 测试4: 读取 A4:AJ188 的原始返回行数（对比）
+    full_rows_count = len(raw_rows)
     
     # 解析原始数据
     raw_dates = []
@@ -1743,9 +1746,15 @@ def debug_capacity():
             "all_dates_with_aj": [{"date": v["date"], "aj": v["aj_value"]} for v in aj_values],
             "wide_range_aj": [],
             "formula_debug": formula_debug,
-            "small_range_AG_AJ": small_debug[:30],
-            "jun21_range_AG_AJ": jun21_debug[:20],
-            "single_AJ27": single_debug,
+            "small_range_AG_AJ": [],
+            "jun21_range_AG_AJ": [],
+            "single_AJ27": [],
+            "range_comparison": {
+                "A4_AJ188_rows": full_rows_count,
+                "AG4_AJ188_rows": small_rows_count,
+                "AG24_AJ188_rows": jun21_rows_count,
+                "AJ27_AJ27_rows": single_rows_count,
+            },
         },
         "capacity_data": [],
         "occupied_summary": {str(k): v for k, v in sorted(occupied.items())}

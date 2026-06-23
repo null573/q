@@ -127,6 +127,7 @@ def read_sheet_range(sheet_id, range_str):
     if resp.status_code == 200:
         data = resp.json()
         return data.get("gridData", {})
+    print(f"[WARN] read_sheet_range failed: {resp.status_code} {range_str} {resp.text[:200]}", flush=True)
     return {}
 
 
