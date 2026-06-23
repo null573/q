@@ -243,7 +243,8 @@ def _read_date_column(sheet_id, start_row, row_count):
 
 def get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count):
     """获取工作表数据，带缓存。
-    优化：拆分为A列+产能列两次小范围读取，大幅减少API返回数据量"""
+    优化：拆分为A列+产能列两次小范围读取，大幅减少API返回数据量。
+    上限日期尽量从产能列读取范围中提取，避免额外API调用。"""
     cache_key = f"{sheet_id}:{start_row}:{capacity_col}:{limit_cell}"
 
     now = time_module.time()
@@ -278,10 +279,8 @@ def get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count):
         if cap_val is not None:
             date_capacity_map[dates[i]] = cap_val
 
-    # 4. 读取上限日期
-    limit_date = None
-    limit_date_str = read_single_cell(sheet_id, limit_cell)
-    limit_date = parse_date(limit_date_str)
+    # 4. 读取上限日期（带独立缓存，避免重复API调用）
+    limit_date = _read_limit_date(sheet_id, limit_cell)
 
     result = {
         "date_capacity_map": date_capacity_map,
@@ -290,6 +289,28 @@ def get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count):
 
     cache[cache_key] = (result, now)
     return result
+
+
+# 上限日期缓存
+_limit_date_cache = {}
+_LIMIT_DATE_CACHE_TTL = 300
+
+
+def _read_limit_date(sheet_id, limit_cell):
+    """读取上限日期，带独立缓存"""
+    cache_key = f"{sheet_id}:{limit_cell}"
+    now = time_module.time()
+
+    if cache_key in _limit_date_cache:
+        data, ts = _limit_date_cache[cache_key]
+        if now - ts < _LIMIT_DATE_CACHE_TTL:
+            return data
+
+    limit_date_str = read_single_cell(sheet_id, limit_cell)
+    limit_date = parse_date(limit_date_str)
+
+    _limit_date_cache[cache_key] = (limit_date, now)
+    return limit_date
 
 
 # 配置表缓存：从腾讯表格配置表读取的型号配置

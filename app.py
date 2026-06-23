@@ -1744,6 +1744,14 @@ def _warmup_capacity_cache():
                 pass  # 等待所有完成
 
         print(f"[warmup-capacity] 产能缓存预热完成: {success}/{total} 个型号")
+
+        # 预热完成后立即触发一次自身keepalive，确保实例活跃
+        try:
+            import requests as req
+            req.get('https://q-en4c.onrender.com/', timeout=10)
+        except:
+            pass
+
     t = threading.Thread(target=run, daemon=True)
     t.start()
 
