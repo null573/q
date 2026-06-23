@@ -1668,12 +1668,20 @@ def debug_capacity():
     small_debug = []
     small_empty_values = 0
     small_nonempty_values = 0
+    small_raw_samples = []  # 原始数据样本
     for i, row in enumerate(small_resp.get("rows", [])):
         values = row.get("values", [])
         if not values:
             small_empty_values += 1
         else:
             small_nonempty_values += 1
+            # 取样本：row 20-25 的原始 values
+            if 20 <= i <= 25:
+                vals_summary = []
+                for j, v in enumerate(values[:4]):
+                    cv = v.get("cellValue")
+                    vals_summary.append(str(cv) if cv else "None")
+                small_raw_samples.append({"row": i, "values": vals_summary})
             def get_v(idx):
                 if len(values) > idx:
                     c = values[idx].get("cellValue")
@@ -1753,7 +1761,8 @@ def debug_capacity():
             "all_dates_with_aj": [{"date": v["date"], "aj": v["aj_value"]} for v in aj_values],
             "wide_range_aj": [],
             "formula_debug": formula_debug,
-            "small_range_AG_AJ": [],
+            "small_range_AG_AJ": small_debug,
+            "small_raw_samples": small_raw_samples,
             "jun21_range_AG_AJ": [],
             "single_AJ27": [],
             "range_comparison": {
