@@ -521,12 +521,16 @@ def read_calculated_date_from_row(row_index_1based):
     """从指定行的E列读取公式计算结果"""
     grid_data = read_sheet_range(SHEET_ID, f"E{row_index_1based}:E{row_index_1based}")
     rows = grid_data.get("rows", [])
+    print(f"[read_calculated_date] row={row_index_1based}, rows={len(rows)}")
     if rows and len(rows) > 0:
         values = rows[0].get("values", [])
         if values:
             cv = values[0].get("cellValue")
+            print(f"[read_calculated_date] cellValue={cv}")
             if cv:
-                return parse_cell_value(cv)
+                result = parse_cell_value(cv)
+                print(f"[read_calculated_date] parsed='{result}'")
+                return result
     return ""
 
 
@@ -805,6 +809,7 @@ def calculate_date():
             time.sleep(wait_interval)
             elapsed += wait_interval
             e_value = read_calculated_date_from_row(target_row)
+            print(f"[calculate-date] row={target_row}, e_value='{e_value}', is_date={is_date_string(e_value)}")
             if e_value and e_value.strip():
                 # 检查是否是有效日期格式
                 if is_date_string(e_value):
@@ -823,11 +828,12 @@ def calculate_date():
                 "submitter_id": submitter_id
             }
 
-        # 5. 更新缓存
-        cache_key = f"{model}:{tonnage}:{expected_date}"
-        _calc_result_cache["key"] = cache_key
-        _calc_result_cache["result"] = calculated_date
-        _calc_result_cache["timestamp"] = now
+        # 5. 更新缓存（仅在非强制刷新时）
+        if not force_refresh:
+            cache_key = f"{model}:{tonnage}:{expected_date}"
+            _calc_result_cache["key"] = cache_key
+            _calc_result_cache["result"] = calculated_date
+            _calc_result_cache["timestamp"] = now
 
         return jsonify({
             "success": True,
