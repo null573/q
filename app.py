@@ -1597,11 +1597,30 @@ def admin_health():
 def debug_capacity():
     """临时调试：查看型号的产能数据和已占用产能"""
     model = request.args.get('model', 'C305')
-    from calc_engine import _get_model_config, get_sheet_data
+    from calc_engine import _get_model_config, get_sheet_data, read_sheet_range, col_letter_to_index, parse_cell_value, parse_date
     config = _get_model_config(model)
     if not config:
         return jsonify({"success": False, "error": f"型号 {model} 未找到配置"})
     sheet_id, start_row, capacity_col, limit_cell, row_count = config
+    
+    # 直接读取原始API响应，用于调试
+    capacity_col_index = col_letter_to_index(capacity_col)
+    end_row = start_row + row_count - 1
+    range_str = f"A{start_row}:{capacity_col}{end_row}"
+    raw_grid_data = read_sheet_range(sheet_id, range_str)
+    raw_rows = raw_grid_data.get("rows", [])
+    
+    # 解析原始数据
+    raw_dates = []
+    for i, row in enumerate(raw_rows):
+        values = row.get("values", [])
+        if values:
+            cv = values[0].get("cellValue")
+            if cv:
+                date_val = parse_cell_value(cv)
+                d = parse_date(date_val)
+                raw_dates.append({"row_index": i, "date": date_val, "parsed": str(d) if d else None, "values_len": len(values)})
+    
     sheet_data = get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count)
     date_capacity_map = sheet_data["date_capacity_map"]
     limit_date = sheet_data["limit_date"]
@@ -1627,10 +1646,16 @@ def debug_capacity():
     dates = sorted(date_capacity_map.keys())
     result = {
         "model": model,
-        "config": {"sheet_id": sheet_id, "start_row": start_row, "capacity_col": capacity_col, "limit_cell": limit_cell, "row_count": row_count},
+        "config": {"sheet_id": sheet_id, "start_row": start_row, "capacity_col": capacity_col, "limit_cell": limit_cell, "row_count": row_count, "range": range_str},
         "limit_date": str(limit_date) if limit_date else None,
         "total_dates": len(dates),
         "date_range": f"{dates[0]} ~ {dates[-1]}" if dates else "empty",
+        "raw_api": {
+            "requested_range": range_str,
+            "returned_rows": len(raw_rows),
+            "first_10_dates": raw_dates[:10],
+            "last_10_dates": raw_dates[-10:] if len(raw_dates) >= 10 else raw_dates,
+        },
         "capacity_data": [],
         "occupied_summary": {str(k): v for k, v in sorted(occupied.items())}
     }
