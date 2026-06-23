@@ -1610,15 +1610,29 @@ def debug_capacity():
     raw_grid_data = read_sheet_range(sheet_id, range_str)
     raw_rows = raw_grid_data.get("rows", [])
     
-    # 测试读取更宽的范围（A到AN）看AJ列公式是否能计算
-    wide_range_str = f"A{start_row}:AN{end_row}"
-    wide_grid_data = read_sheet_range(sheet_id, wide_range_str)
-    wide_rows = wide_grid_data.get("rows", [])
+    # 测试1: 只读取 AG:AJ 列（小范围，4列），看公式是否能计算
+    small_range = f"AG{start_row}:AJ{end_row}"
+    small_data = read_sheet_range(sheet_id, small_range)
+    small_rows = small_data.get("rows", [])
+    
+    # 测试2: 读取 AG:AJ 列但只取 6月21日之后的行 (row 24 onwards)
+    jun21_start = start_row + 20  # 6月21日大约在 row 24
+    jun21_range = f"AG{jun21_start}:AJ{end_row}"
+    jun21_data = read_sheet_range(sheet_id, jun21_range)
+    jun21_rows = jun21_data.get("rows", [])
+    
+    # 测试3: 读取单行 AJ27 看公式值
+    single_cell = read_sheet_range(sheet_id, "AJ27:AJ27")
+    single_rows = single_cell.get("rows", [])
     
     # 解析原始数据
     raw_dates = []
     aj_values = []
-    wide_aj_values = []
+    # AJ公式: =AJ_prev + AG(产量) - AI(销售) - AH(自用)
+    ag_col_idx = col_letter_to_index("AG")  # 产量
+    ah_col_idx = col_letter_to_index("AH")  # 自用
+    ai_col_idx = col_letter_to_index("AI")  # 销售
+    formula_debug = []
     for i, row in enumerate(raw_rows):
         values = row.get("values", [])
         if values:
@@ -1632,20 +1646,7 @@ def debug_capacity():
                     aj_cv = values[capacity_col_index].get("cellValue")
                     aj_val = parse_cell_value(aj_cv) if aj_cv else None
                     aj_values.append({"row_index": i, "date": date_val, "aj_value": aj_val, "aj_raw": str(aj_cv) if aj_cv else None})
-    
-    # 检查宽范围中的AJ列值 + AG/AH/AI列值
-    # AJ公式: =AJ_prev + AG(产量) - AI(销售) - AH(自用)
-    ag_col_idx = col_letter_to_index("AG")  # 产量
-    ah_col_idx = col_letter_to_index("AH")  # 自用
-    ai_col_idx = col_letter_to_index("AI")  # 销售
-    formula_debug = []
-    for i, row in enumerate(wide_rows):
-        values = row.get("values", [])
-        if values:
-            cv = values[0].get("cellValue")
-            if cv:
-                date_val = parse_cell_value(cv)
-                d = parse_date(date_val)
+                # 检查 AG/AH/AI
                 if d and str(d) >= "2026-06-18" and str(d) <= "2026-06-30":
                     def get_col_val(idx):
                         if len(values) > idx:
@@ -1659,6 +1660,50 @@ def debug_capacity():
                         "AI(销售)": get_col_val(ai_col_idx),
                         "AJ(结余)": get_col_val(capacity_col_index),
                     })
+    
+    # 解析小范围数据 (AG:AJ)
+    small_debug = []
+    for i, row in enumerate(small_rows):
+        values = row.get("values", [])
+        if values:
+            def get_v(idx):
+                if len(values) > idx:
+                    c = values[idx].get("cellValue")
+                    return parse_cell_value(c) if c else None
+                return None
+            small_debug.append({
+                "row_in_range": i,
+                "AG": get_v(0),
+                "AH": get_v(1),
+                "AI": get_v(2),
+                "AJ": get_v(3),
+            })
+    
+    # 解析6月21日后小范围
+    jun21_debug = []
+    for i, row in enumerate(jun21_rows):
+        values = row.get("values", [])
+        if values:
+            def get_v(idx):
+                if len(values) > idx:
+                    c = values[idx].get("cellValue")
+                    return parse_cell_value(c) if c else None
+                return None
+            jun21_debug.append({
+                "row_in_range": i,
+                "AG": get_v(0),
+                "AH": get_v(1),
+                "AI": get_v(2),
+                "AJ": get_v(3),
+            })
+    
+    # 解析单行 AJ27
+    single_debug = []
+    for row in single_rows:
+        values = row.get("values", [])
+        for v in values:
+            cv = v.get("cellValue")
+            single_debug.append(str(cv) if cv else None)
     
     sheet_data = get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count)
     date_capacity_map = sheet_data["date_capacity_map"]
@@ -1698,6 +1743,9 @@ def debug_capacity():
             "all_dates_with_aj": [{"date": v["date"], "aj": v["aj_value"]} for v in aj_values],
             "wide_range_aj": [],
             "formula_debug": formula_debug,
+            "small_range_AG_AJ": small_debug[:30],
+            "jun21_range_AG_AJ": jun21_debug[:20],
+            "single_AJ27": single_debug,
         },
         "capacity_data": [],
         "occupied_summary": {str(k): v for k, v in sorted(occupied.items())}
