@@ -203,9 +203,47 @@ def parse_number(val):
 cache = {}
 CACHE_TTL = 300  # 300秒缓存（产能数据变化不频繁，延长缓存时间）
 
+# A列日期数据缓存（按sheet_id+start_row分组，同sheet多个型号共享）
+_date_col_cache = {}
+_DATE_COL_CACHE_TTL = 300
+
+
+def _read_date_column(sheet_id, start_row, row_count):
+    """读取A列日期数据，带独立缓存（同sheet多个型号共享）"""
+    cache_key = f"{sheet_id}:{start_row}"
+    now = time_module.time()
+
+    if cache_key in _date_col_cache:
+        data, ts = _date_col_cache[cache_key]
+        if now - ts < _DATE_COL_CACHE_TTL:
+            return data
+
+    end_row = start_row + row_count - 1
+    range_str = f"A{start_row}:A{end_row}"
+    grid_data = read_sheet_range(sheet_id, range_str)
+    rows = grid_data.get("rows", [])
+
+    # 解析日期列表（保持行顺序）
+    dates = []
+    for row in rows:
+        values = row.get("values", [])
+        if not values:
+            dates.append(None)
+            continue
+        cv = values[0].get("cellValue")
+        if cv:
+            date_val = parse_cell_value(cv)
+            dates.append(parse_date(date_val))
+        else:
+            dates.append(None)
+
+    _date_col_cache[cache_key] = (dates, now)
+    return dates
+
 
 def get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count):
-    """获取工作表数据，带缓存。优化：一次性读取日期列+产能列+上限日期，减少API调用"""
+    """获取工作表数据，带缓存。
+    优化：拆分为A列+产能列两次小范围读取，大幅减少API返回数据量"""
     cache_key = f"{sheet_id}:{start_row}:{capacity_col}:{limit_cell}"
 
     now = time_module.time()
@@ -215,63 +253,35 @@ def get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count):
         if now - cached_time < CACHE_TTL:
             return cached_data
 
-    capacity_col_index = col_letter_to_index(capacity_col)
+    # 1. 读取A列日期（带独立缓存，同sheet多个型号共享）
+    dates = _read_date_column(sheet_id, start_row, row_count)
 
-    # 优化：一次性读取A列（日期）和产能列（如J列）
+    # 2. 只读取产能列（单列，数据量极小）
     end_row = start_row + row_count - 1
-    range_str = f"A{start_row}:{capacity_col}{end_row}"
+    range_str = f"{capacity_col}{start_row}:{capacity_col}{end_row}"
     grid_data = read_sheet_range(sheet_id, range_str)
     rows = grid_data.get("rows", [])
 
-    # 解析数据：A列是日期，最后一列是产能
+    # 3. 合并日期+产能
     date_capacity_map = {}
-
-    for row in rows:
+    for i, row in enumerate(rows):
+        if i >= len(dates) or dates[i] is None:
+            continue
         values = row.get("values", [])
-        if len(values) < capacity_col_index + 1:
+        if not values:
             continue
-
-        # 解析A列日期（values[0]）
         cv = values[0].get("cellValue")
-        if not cv:
-            continue
-        date_val = parse_cell_value(cv)
-        if not date_val:
-            continue
-
-        # 解析产能列
-        cv = values[capacity_col_index].get("cellValue")
         if not cv:
             continue
         cap_str = parse_cell_value(cv)
         cap_val = parse_number(cap_str)
-        if cap_val is None:
-            continue
+        if cap_val is not None:
+            date_capacity_map[dates[i]] = cap_val
 
-        d = parse_date(date_val)
-        if d:
-            date_capacity_map[d] = cap_val
-
-    # 优化：上限日期从已读取的数据中提取（如果 limit_cell 在读取范围内）
+    # 4. 读取上限日期
     limit_date = None
-    limit_match = _LIMIT_CELL_RE.match(limit_cell)
-    if limit_match:
-        limit_col_letter = limit_match.group(1)
-        limit_row_num = int(limit_match.group(2))
-        limit_col_idx = col_letter_to_index(limit_col_letter)
-        if limit_row_num >= start_row and limit_row_num <= end_row and limit_col_idx <= capacity_col_index:
-            row_offset = limit_row_num - start_row
-            if row_offset < len(rows):
-                row_vals = rows[row_offset].get("values", [])
-                if len(row_vals) > limit_col_idx:
-                    cv = row_vals[limit_col_idx].get("cellValue")
-                    if cv:
-                        limit_date = parse_date(parse_cell_value(cv))
-
-    # 如果上限日期不在读取范围内，再单独读取
-    if limit_date is None:
-        limit_date_str = read_single_cell(sheet_id, limit_cell)
-        limit_date = parse_date(limit_date_str)
+    limit_date_str = read_single_cell(sheet_id, limit_cell)
+    limit_date = parse_date(limit_date_str)
 
     result = {
         "date_capacity_map": date_capacity_map,

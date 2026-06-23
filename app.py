@@ -1689,20 +1689,41 @@ def _warmup_keepalive():
 
 
 def _warmup_capacity_cache():
-    """后台线程：启动时预热所有型号的产能数据缓存，减少首次计算延迟"""
+    """后台线程：启动时并行预热所有型号的产能数据缓存，减少首次计算延迟"""
     import threading
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     def run():
         time.sleep(8)  # 等待token注入完成
         from calc_engine import MODEL_CONFIG, get_sheet_data
+
+        # 按sheet分组，同sheet的A列只读一次（共享缓存）
+        sheet_groups = {}
+        for model, config in MODEL_CONFIG.items():
+            sheet_id = config[0]
+            if sheet_id not in sheet_groups:
+                sheet_groups[sheet_id] = []
+            sheet_groups[sheet_id].append((model, config))
+
         total = len(MODEL_CONFIG)
         success = 0
-        for model, config in MODEL_CONFIG.items():
-            try:
-                sheet_id, start_row, capacity_col, limit_cell, row_count = config
-                get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count)
-                success += 1
-            except Exception as e:
-                print(f"[warmup-capacity] {model} 预热失败: {e}")
+
+        # 并行预热不同sheet的数据
+        def warmup_sheet(sheet_id, models):
+            nonlocal success
+            for model, config in models:
+                try:
+                    get_sheet_data(*config)
+                    success += 1
+                except Exception as e:
+                    print(f"[warmup-capacity] {model} 预热失败: {e}")
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = []
+            for sheet_id, models in sheet_groups.items():
+                futures.append(executor.submit(warmup_sheet, sheet_id, models))
+            for f in as_completed(futures):
+                pass  # 等待所有完成
+
         print(f"[warmup-capacity] 产能缓存预热完成: {success}/{total} 个型号")
     t = threading.Thread(target=run, daemon=True)
     t.start()
