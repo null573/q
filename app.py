@@ -1664,23 +1664,29 @@ def debug_capacity():
                         "AJ(结余)": get_col_val(capacity_col_index),
                     })
     
-    # 解析小范围数据 (AG:AJ)
+    # 解析小范围数据 (AG:AJ) - 检查values是否为空
     small_debug = []
+    small_empty_values = 0
+    small_nonempty_values = 0
     for i, row in enumerate(small_resp.get("rows", [])):
         values = row.get("values", [])
-        if values:
+        if not values:
+            small_empty_values += 1
+        else:
+            small_nonempty_values += 1
             def get_v(idx):
                 if len(values) > idx:
                     c = values[idx].get("cellValue")
                     return parse_cell_value(c) if c else None
                 return None
-            small_debug.append({
-                "row_in_range": i,
-                "AG": get_v(0),
-                "AH": get_v(1),
-                "AI": get_v(2),
-                "AJ": get_v(3),
-            })
+            if i >= 18 and i <= 30:  # 6月19日~7月1日
+                small_debug.append({
+                    "row_in_range": i,
+                    "AG": get_v(0),
+                    "AH": get_v(1),
+                    "AI": get_v(2),
+                    "AJ": get_v(3),
+                })
     
     # 解析6月21日后小范围
     jun21_debug = []
@@ -1692,13 +1698,14 @@ def debug_capacity():
                     c = values[idx].get("cellValue")
                     return parse_cell_value(c) if c else None
                 return None
-            jun21_debug.append({
-                "row_in_range": i,
-                "AG": get_v(0),
-                "AH": get_v(1),
-                "AI": get_v(2),
-                "AJ": get_v(3),
-            })
+            if i < 10:
+                jun21_debug.append({
+                    "row_in_range": i,
+                    "AG": get_v(0),
+                    "AH": get_v(1),
+                    "AI": get_v(2),
+                    "AJ": get_v(3),
+                })
     
     # 解析单行 AJ27
     single_debug = []
@@ -1754,6 +1761,8 @@ def debug_capacity():
                 "AG4_AJ188_rows": small_rows_count,
                 "AG24_AJ188_rows": jun21_rows_count,
                 "AJ27_AJ27_rows": single_rows_count,
+                "AG4_AJ188_empty_values": small_empty_values,
+                "AG4_AJ188_nonempty_values": small_nonempty_values,
             },
         },
         "capacity_data": [],
