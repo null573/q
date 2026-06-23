@@ -321,7 +321,19 @@ def parse_cell_value(cell_value):
         return str(cell_value["number"])
     if "time" in cell_value:
         t = cell_value["time"]
-        result = f"{t['year']}-{t['month']:02d}-{t['day']:02d}"
+        # 处理时区：腾讯API返回的是UTC时间戳，需要转换为北京时间
+        import datetime
+        try:
+            # 尝试从time对象构建UTC日期，然后转为北京时间
+            utc_dt = datetime.datetime(t['year'], t['month'], t['day'], 
+                                      t.get('hour', 0), t.get('minute', 0), t.get('second', 0),
+                                      tzinfo=datetime.timezone.utc)
+            # 转为北京时间 (UTC+8)
+            beijing_dt = utc_dt.astimezone(datetime.timezone(datetime.timedelta(hours=8)))
+            result = beijing_dt.strftime("%Y-%m-%d")
+        except Exception:
+            # 如果转换失败，直接使用原始值
+            result = f"{t['year']}-{t['month']:02d}-{t['day']:02d}"
         # 过滤Excel空日期默认值
         if result == "1899-12-30":
             return ""
@@ -521,16 +533,12 @@ def read_calculated_date_from_row(row_index_1based):
     """从指定行的E列读取公式计算结果"""
     grid_data = read_sheet_range(SHEET_ID, f"E{row_index_1based}:E{row_index_1based}")
     rows = grid_data.get("rows", [])
-    print(f"[read_calculated_date] row={row_index_1based}, rows={len(rows)}")
     if rows and len(rows) > 0:
         values = rows[0].get("values", [])
         if values:
             cv = values[0].get("cellValue")
-            print(f"[read_calculated_date] cellValue={cv}")
             if cv:
-                result = parse_cell_value(cv)
-                print(f"[read_calculated_date] parsed='{result}'")
-                return result
+                return parse_cell_value(cv)
     return ""
 
 
@@ -809,7 +817,6 @@ def calculate_date():
             time.sleep(wait_interval)
             elapsed += wait_interval
             e_value = read_calculated_date_from_row(target_row)
-            print(f"[calculate-date] row={target_row}, e_value='{e_value}', is_date={is_date_string(e_value)}")
             if e_value and e_value.strip():
                 # 检查是否是有效日期格式
                 if is_date_string(e_value):
