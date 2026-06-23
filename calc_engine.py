@@ -243,8 +243,7 @@ def _read_date_column(sheet_id, start_row, row_count):
 
 def get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count):
     """获取工作表数据，带缓存。
-    优化：拆分为A列+产能列两次小范围读取，大幅减少API返回数据量。
-    上限日期尽量从产能列读取范围中提取，避免额外API调用。"""
+    优化：一次读取A列到产能列的范围（避免API截断末尾空行），提取日期和产能"""
     cache_key = f"{sheet_id}:{start_row}:{capacity_col}:{limit_cell}"
 
     now = time_module.time()
@@ -254,32 +253,50 @@ def get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count):
         if now - cached_time < CACHE_TTL:
             return cached_data
 
-    # 1. 读取A列日期（带独立缓存，同sheet多个型号共享）
-    dates = _read_date_column(sheet_id, start_row, row_count)
+    capacity_col_index = col_letter_to_index(capacity_col)
 
-    # 2. 只读取产能列（单列，数据量极小）
+    # 一次读取A列到产能列的范围（多列读取不会截断末尾空行）
     end_row = start_row + row_count - 1
-    range_str = f"{capacity_col}{start_row}:{capacity_col}{end_row}"
+    range_str = f"A{start_row}:{capacity_col}{end_row}"
     grid_data = read_sheet_range(sheet_id, range_str)
     rows = grid_data.get("rows", [])
 
-    # 3. 合并日期+产能
+    # 提取日期（A列）和产能列
+    # 同时更新A列缓存（同sheet多个型号共享）
+    date_col_cache_key = f"{sheet_id}:{start_row}"
+    dates_cached = []
+
     date_capacity_map = {}
-    for i, row in enumerate(rows):
-        if i >= len(dates) or dates[i] is None:
-            continue
+
+    for row in rows:
         values = row.get("values", [])
-        if not values:
+        if len(values) < capacity_col_index + 1:
+            dates_cached.append(None)
             continue
+
+        # A列日期
         cv = values[0].get("cellValue")
+        if cv:
+            date_val = parse_cell_value(cv)
+            d = parse_date(date_val)
+            dates_cached.append(d)
+        else:
+            dates_cached.append(None)
+            continue
+
+        # 产能列
+        cv = values[capacity_col_index].get("cellValue")
         if not cv:
             continue
         cap_str = parse_cell_value(cv)
         cap_val = parse_number(cap_str)
         if cap_val is not None:
-            date_capacity_map[dates[i]] = cap_val
+            date_capacity_map[d] = cap_val
 
-    # 4. 读取上限日期（带独立缓存，避免重复API调用）
+    # 更新A列缓存
+    _date_col_cache[date_col_cache_key] = (dates_cached, now)
+
+    # 读取上限日期（带独立缓存，避免重复API调用）
     limit_date = _read_limit_date(sheet_id, limit_cell)
 
     result = {
