@@ -1612,6 +1612,7 @@ def debug_capacity():
     
     # 解析原始数据
     raw_dates = []
+    aj_values = []
     for i, row in enumerate(raw_rows):
         values = row.get("values", [])
         if values:
@@ -1620,6 +1621,11 @@ def debug_capacity():
                 date_val = parse_cell_value(cv)
                 d = parse_date(date_val)
                 raw_dates.append({"row_index": i, "date": date_val, "parsed": str(d) if d else None, "values_len": len(values)})
+                # 检查AJ列值
+                if len(values) > capacity_col_index:
+                    aj_cv = values[capacity_col_index].get("cellValue")
+                    aj_val = parse_cell_value(aj_cv) if aj_cv else None
+                    aj_values.append({"row_index": i, "date": date_val, "aj_value": aj_val, "aj_raw": str(aj_cv) if aj_cv else None})
     
     sheet_data = get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count)
     date_capacity_map = sheet_data["date_capacity_map"]
@@ -1655,6 +1661,7 @@ def debug_capacity():
             "returned_rows": len(raw_rows),
             "first_10_dates": raw_dates[:10],
             "last_10_dates": raw_dates[-10:] if len(raw_dates) >= 10 else raw_dates,
+            "aj_around_june20": [v for v in aj_values if v["date"] in ["2026-06-19", "2026-06-20", "2026-06-21", "2026-06-22", "2026-06-23", "2026-06-24", "2026-06-25"]],
         },
         "capacity_data": [],
         "occupied_summary": {str(k): v for k, v in sorted(occupied.items())}
