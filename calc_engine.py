@@ -253,6 +253,10 @@ def get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count):
         cached_data, cached_time = cache[cache_key]
         if now - cached_time < CACHE_TTL:
             return cached_data
+        else:
+            print(f"[calc_engine] cache expired for {cache_key}, age={now-cached_time:.0f}s")
+    else:
+        print(f"[calc_engine] cache miss for {cache_key}")
 
     # 1. 读取A列日期（带独立缓存，同sheet多个型号共享）
     dates = _read_date_column(sheet_id, start_row, row_count)
