@@ -1662,6 +1662,7 @@ def debug_capacity():
             "first_10_dates": raw_dates[:10],
             "last_10_dates": raw_dates[-10:] if len(raw_dates) >= 10 else raw_dates,
             "aj_around_june20": [v for v in aj_values if v["date"] in ["2026-06-19", "2026-06-20", "2026-06-21", "2026-06-22", "2026-06-23", "2026-06-24", "2026-06-25"]],
+            "all_dates_with_aj": [{"date": v["date"], "aj": v["aj_value"]} for v in aj_values],
         },
         "capacity_data": [],
         "occupied_summary": {str(k): v for k, v in sorted(occupied.items())}
