@@ -841,6 +841,33 @@ def _cleanup_expired_temp_rows():
             del _temp_row_tracker[key]
 
 
+@app.route('/api/clear-temp-row', methods=['POST'])
+@require_auth
+def clear_temp_row_api():
+    """清空指定临时行（页面刷新/关闭时调用）"""
+    try:
+        data = request.json
+        row_index = data.get('row_index', 0)
+        submitter_id = request.headers.get('X-Employee-Id', '')
+
+        if row_index > 0:
+            # 清空该行的A/B/D列（保留E列公式）
+            clear_temp_row(row_index)
+
+            # 从临时行跟踪器中移除
+            with _temp_row_lock:
+                keys_to_remove = []
+                for key, info in _temp_row_tracker.items():
+                    if info["row_index"] == row_index and info["submitter_id"] == submitter_id:
+                        keys_to_remove.append(key)
+                for key in keys_to_remove:
+                    del _temp_row_tracker[key]
+
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
 @app.route('/api/orders', methods=['POST'])
 @require_auth
 def create_order():

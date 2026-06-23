@@ -1389,9 +1389,22 @@ function hasUnsavedOrder() {
     return model || tonnage || customer;
 }
 
-// 页面关闭/刷新前，如果有未提交的排队，清除表单
+// 页面关闭/刷新前，如果有未提交的排队，清除表单并通知后端清空临时行
 window.addEventListener('beforeunload', function(e) {
     if (hasUnsavedOrder()) {
+        // 同步发送请求清空后端临时行（beforeunload中必须使用同步请求）
+        if (pendingRowIndex > 0) {
+            try {
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', `${API_BASE}/api/clear-temp-row`, false); // 同步请求
+                xhr.setRequestHeader('Content-Type', 'application/json');
+                xhr.setRequestHeader('X-Access-Password', accessPassword);
+                xhr.setRequestHeader('X-Employee-Id', employeeId);
+                xhr.send(JSON.stringify({ row_index: pendingRowIndex }));
+            } catch (err) {
+                // 忽略错误，页面即将关闭
+            }
+        }
         // 清除表单数据，不保存
         document.getElementById('orderForm').reset();
     }
