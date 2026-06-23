@@ -1633,7 +1633,12 @@ def debug_capacity():
                     aj_val = parse_cell_value(aj_cv) if aj_cv else None
                     aj_values.append({"row_index": i, "date": date_val, "aj_value": aj_val, "aj_raw": str(aj_cv) if aj_cv else None})
     
-    # 检查宽范围中的AJ列值
+    # 检查宽范围中的AJ列值 + AG/AH/AI列值
+    # AJ公式: =AJ_prev + AG(产量) - AI(销售) - AH(自用)
+    ag_col_idx = col_letter_to_index("AG")  # 产量
+    ah_col_idx = col_letter_to_index("AH")  # 自用
+    ai_col_idx = col_letter_to_index("AI")  # 销售
+    formula_debug = []
     for i, row in enumerate(wide_rows):
         values = row.get("values", [])
         if values:
@@ -1641,10 +1646,19 @@ def debug_capacity():
             if cv:
                 date_val = parse_cell_value(cv)
                 d = parse_date(date_val)
-                if len(values) > capacity_col_index:
-                    aj_cv = values[capacity_col_index].get("cellValue")
-                    aj_val = parse_cell_value(aj_cv) if aj_cv else None
-                    wide_aj_values.append({"row_index": i, "date": date_val, "aj_value": aj_val})
+                if d and str(d) >= "2026-06-18" and str(d) <= "2026-06-30":
+                    def get_col_val(idx):
+                        if len(values) > idx:
+                            c = values[idx].get("cellValue")
+                            return parse_cell_value(c) if c else None
+                        return None
+                    formula_debug.append({
+                        "date": date_val,
+                        "AG(产量)": get_col_val(ag_col_idx),
+                        "AH(自用)": get_col_val(ah_col_idx),
+                        "AI(销售)": get_col_val(ai_col_idx),
+                        "AJ(结余)": get_col_val(capacity_col_index),
+                    })
     
     sheet_data = get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count)
     date_capacity_map = sheet_data["date_capacity_map"]
@@ -1682,7 +1696,8 @@ def debug_capacity():
             "last_10_dates": raw_dates[-10:] if len(raw_dates) >= 10 else raw_dates,
             "aj_around_june20": [v for v in aj_values if v["date"] in ["2026-06-19", "2026-06-20", "2026-06-21", "2026-06-22", "2026-06-23", "2026-06-24", "2026-06-25"]],
             "all_dates_with_aj": [{"date": v["date"], "aj": v["aj_value"]} for v in aj_values],
-            "wide_range_aj": [{"date": v["date"], "aj": v["aj_value"]} for v in wide_aj_values if v["date"] in ["2026-06-19", "2026-06-20", "2026-06-21", "2026-06-22", "2026-06-23", "2026-06-24", "2026-06-25", "2026-06-26", "2026-06-27", "2026-06-28", "2026-06-29", "2026-06-30"]],
+            "wide_range_aj": [],
+            "formula_debug": formula_debug,
         },
         "capacity_data": [],
         "occupied_summary": {str(k): v for k, v in sorted(occupied.items())}
