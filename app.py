@@ -1609,6 +1609,61 @@ def admin_health():
     return jsonify({"success": True, "healthy": len(issues) == 0, "issues": issues})
 
 
+@app.route('/api/debug/capacity', methods=['GET'])
+@require_auth
+@require_ligang_admin
+def debug_capacity():
+    """临时调试：查看型号的产能数据和已占用产能"""
+    model = request.args.get('model', 'C305')
+    from calc_engine import _get_model_config, get_sheet_data
+    config = _get_model_config(model)
+    if not config:
+        return jsonify({"success": False, "error": f"型号 {model} 未找到配置"})
+    sheet_id, start_row, capacity_col, limit_cell, row_count = config
+    sheet_data = get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count)
+    date_capacity_map = sheet_data["date_capacity_map"]
+    limit_date = sheet_data["limit_date"]
+
+    # 获取已占用产能
+    occupied = {}
+    try:
+        all_orders = fetch_all_orders_raw()
+        for order in all_orders:
+            if str(order.get("model", "")).strip() != model:
+                continue
+            qd = str(order.get("queue_date", "")).strip()
+            if qd:
+                d = parse_date(qd)
+                if d:
+                    t = parse_number(order.get("tonnage", "0"))
+                    if t and t > 0:
+                        occupied[d] = occupied.get(d, 0) + t
+    except:
+        pass
+
+    # 构建结果
+    dates = sorted(date_capacity_map.keys())
+    result = {
+        "model": model,
+        "config": {"sheet_id": sheet_id, "start_row": start_row, "capacity_col": capacity_col, "limit_cell": limit_cell, "row_count": row_count},
+        "limit_date": str(limit_date) if limit_date else None,
+        "total_dates": len(dates),
+        "date_range": f"{dates[0]} ~ {dates[-1]}" if dates else "empty",
+        "capacity_data": [],
+        "occupied_summary": {str(k): v for k, v in sorted(occupied.items())}
+    }
+    for d in dates:
+        cap = date_capacity_map[d]
+        occ = occupied.get(d, 0)
+        result["capacity_data"].append({
+            "date": str(d),
+            "capacity": cap,
+            "occupied": occ,
+            "remaining": cap - occ
+        })
+    return jsonify({"success": True, "data": result})
+
+
 @app.route('/api/test-connection', methods=['GET'])
 @require_auth
 def test_connection():
