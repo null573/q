@@ -1389,24 +1389,48 @@ function hasUnsavedOrder() {
     return model || tonnage || customer;
 }
 
-// 页面关闭/刷新前，如果有未提交的排队，清除表单并通知后端清空临时行
+// 清空临时行的函数（页面切换/刷新/关闭时调用）
+function clearTempRowSync() {
+    if (pendingRowIndex > 0) {
+        try {
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', `${API_BASE}/api/clear-temp-row`, false); // 同步请求
+            xhr.setRequestHeader('Content-Type', 'application/json');
+            xhr.setRequestHeader('X-Access-Password', accessPassword);
+            xhr.setRequestHeader('X-Employee-Id', employeeId);
+            xhr.send(JSON.stringify({ row_index: pendingRowIndex }));
+        } catch (err) {
+            // 忽略错误
+        }
+        pendingRowIndex = 0;
+    }
+}
+
+// 页面关闭/刷新前
 window.addEventListener('beforeunload', function(e) {
     if (hasUnsavedOrder()) {
-        // 同步发送请求清空后端临时行（beforeunload中必须使用同步请求）
-        if (pendingRowIndex > 0) {
-            try {
-                const xhr = new XMLHttpRequest();
-                xhr.open('POST', `${API_BASE}/api/clear-temp-row`, false); // 同步请求
-                xhr.setRequestHeader('Content-Type', 'application/json');
-                xhr.setRequestHeader('X-Access-Password', accessPassword);
-                xhr.setRequestHeader('X-Employee-Id', employeeId);
-                xhr.send(JSON.stringify({ row_index: pendingRowIndex }));
-            } catch (err) {
-                // 忽略错误，页面即将关闭
-            }
-        }
-        // 清除表单数据，不保存
+        clearTempRowSync();
         document.getElementById('orderForm').reset();
+    }
+});
+
+// 页面隐藏时（切换标签页、最小化等）
+window.addEventListener('pagehide', function(e) {
+    if (hasUnsavedOrder()) {
+        clearTempRowSync();
+    }
+});
+
+// 页面可见性变化时（切换标签页）
+document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'hidden' && hasUnsavedOrder()) {
+        // 使用sendBeacon确保请求发送（比同步XHR更可靠）
+        if (pendingRowIndex > 0 && navigator.sendBeacon) {
+            const data = JSON.stringify({ row_index: pendingRowIndex });
+            const blob = new Blob([data], { type: 'application/json' });
+            navigator.sendBeacon(`${API_BASE}/api/clear-temp-row`, blob);
+            pendingRowIndex = 0;
+        }
     }
 });
 

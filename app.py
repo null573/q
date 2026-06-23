@@ -566,7 +566,7 @@ def write_order_row(row_index_0based, model, tonnage, customer, expected_date, c
         build_cell_value(tonnage, is_number=True),      # B: 吨位
         build_cell_value(customer),                      # C: 客户
         build_cell_value(expected_date, is_date=True),  # D: 期望发货日期
-        build_cell_value(""),                            # E: 可发货日期（不覆盖，保留公式）
+        # E列不写入，保留公式
         build_cell_value(queue_date, is_date=queue_date_is_date),  # F: 排队日期
         build_cell_value(submitter),                     # G: 提交人
         build_cell_value(remark),                        # H: 备注
@@ -842,23 +842,24 @@ def _cleanup_expired_temp_rows():
 
 
 @app.route('/api/clear-temp-row', methods=['POST'])
-@require_auth
 def clear_temp_row_api():
-    """清空指定临时行（页面刷新/关闭时调用）"""
+    """清空指定临时行（页面刷新/关闭时调用）
+    注意：sendBeacon请求不携带自定义headers，所以不强制认证
+    通过row_index直接清空即可，无需验证用户身份
+    """
     try:
-        data = request.json
+        data = request.json or {}
         row_index = data.get('row_index', 0)
-        submitter_id = request.headers.get('X-Employee-Id', '')
 
         if row_index > 0:
             # 清空该行的A/B/D列（保留E列公式）
             clear_temp_row(row_index)
 
-            # 从临时行跟踪器中移除
+            # 从临时行跟踪器中移除（不验证submitter_id，因为sendBeacon可能没有headers）
             with _temp_row_lock:
                 keys_to_remove = []
                 for key, info in _temp_row_tracker.items():
-                    if info["row_index"] == row_index and info["submitter_id"] == submitter_id:
+                    if info["row_index"] == row_index:
                         keys_to_remove.append(key)
                 for key in keys_to_remove:
                     del _temp_row_tracker[key]
