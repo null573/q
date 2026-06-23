@@ -1610,9 +1610,15 @@ def debug_capacity():
     raw_grid_data = read_sheet_range(sheet_id, range_str)
     raw_rows = raw_grid_data.get("rows", [])
     
+    # 测试读取更宽的范围（A到AN）看AJ列公式是否能计算
+    wide_range_str = f"A{start_row}:AN{end_row}"
+    wide_grid_data = read_sheet_range(sheet_id, wide_range_str)
+    wide_rows = wide_grid_data.get("rows", [])
+    
     # 解析原始数据
     raw_dates = []
     aj_values = []
+    wide_aj_values = []
     for i, row in enumerate(raw_rows):
         values = row.get("values", [])
         if values:
@@ -1626,6 +1632,19 @@ def debug_capacity():
                     aj_cv = values[capacity_col_index].get("cellValue")
                     aj_val = parse_cell_value(aj_cv) if aj_cv else None
                     aj_values.append({"row_index": i, "date": date_val, "aj_value": aj_val, "aj_raw": str(aj_cv) if aj_cv else None})
+    
+    # 检查宽范围中的AJ列值
+    for i, row in enumerate(wide_rows):
+        values = row.get("values", [])
+        if values:
+            cv = values[0].get("cellValue")
+            if cv:
+                date_val = parse_cell_value(cv)
+                d = parse_date(date_val)
+                if len(values) > capacity_col_index:
+                    aj_cv = values[capacity_col_index].get("cellValue")
+                    aj_val = parse_cell_value(aj_cv) if aj_cv else None
+                    wide_aj_values.append({"row_index": i, "date": date_val, "aj_value": aj_val})
     
     sheet_data = get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count)
     date_capacity_map = sheet_data["date_capacity_map"]
@@ -1663,6 +1682,7 @@ def debug_capacity():
             "last_10_dates": raw_dates[-10:] if len(raw_dates) >= 10 else raw_dates,
             "aj_around_june20": [v for v in aj_values if v["date"] in ["2026-06-19", "2026-06-20", "2026-06-21", "2026-06-22", "2026-06-23", "2026-06-24", "2026-06-25"]],
             "all_dates_with_aj": [{"date": v["date"], "aj": v["aj_value"]} for v in aj_values],
+            "wide_range_aj": [{"date": v["date"], "aj": v["aj_value"]} for v in wide_aj_values if v["date"] in ["2026-06-19", "2026-06-20", "2026-06-21", "2026-06-22", "2026-06-23", "2026-06-24", "2026-06-25", "2026-06-26", "2026-06-27", "2026-06-28", "2026-06-29", "2026-06-30"]],
         },
         "capacity_data": [],
         "occupied_summary": {str(k): v for k, v in sorted(occupied.items())}
