@@ -332,7 +332,7 @@ def calculate_delivery_date(model, tonnage_str, expected_date_str, occupied_capa
         model: 型号
         tonnage_str: 吨位（字符串）
         expected_date_str: 期望发货日期（字符串 YYYY-MM-DD）
-        occupied_capacity: 已占用产能字典 {date: 已占用吨位}，用于扣减已有订单
+        occupied_capacity: 已占用产能字典 {date: 已占用吨位}（保留参数，库存余额型列不需要）
 
     返回:
         (calculated_date_str, message)
@@ -371,25 +371,15 @@ def calculate_delivery_date(model, tonnage_str, expected_date_str, occupied_capa
         if not limit_date:
             return "请联系商务支持", "上限日期未设置"
 
-    # 6. 计算剩余产能 = 原始产能 - 已占用产能
-    remaining_capacity_map = {}
-    for d, cap in date_capacity_map.items():
-        occupied = 0
-        if occupied_capacity and d in occupied_capacity:
-            occupied = occupied_capacity[d]
-        remaining = cap - occupied
-        remaining_capacity_map[d] = remaining
-
-    # 7. 公式逻辑：
+    # 6. 公式逻辑（产能列为库存余额，已包含订单扣减，直接使用原始值）：
     #    筛选日期在 [expected_date, limit_date] 范围内的行
-    #    如果对应剩余产能的最小值 >= 吨位，返回期望日期
-    #    否则，找剩余产能 < 吨位的行中最大的日期，+1天
+    #    如果对应库存余额的最小值 >= 吨位，返回期望日期
+    #    否则，找库存余额 < 吨位的行中最大的日期，+1天
 
-    # 筛选符合条件的日期和剩余产能
     filtered_caps = []
     low_cap_dates = []
 
-    for d, cap in remaining_capacity_map.items():
+    for d, cap in date_capacity_map.items():
         if expected_date <= d <= limit_date:
             filtered_caps.append(cap)
             if cap < tonnage:
@@ -399,7 +389,7 @@ def calculate_delivery_date(model, tonnage_str, expected_date_str, occupied_capa
         max_data_date = max(date_capacity_map.keys())
         return "请联系商务支持", f"排产数据只到{max_data_date.strftime('%m月%d日')}，期望日期{expected_date_str}超出范围"
 
-    # 检查剩余产能最小值是否 >= 吨位
+    # 检查库存余额最小值是否 >= 吨位
     if min(filtered_caps) >= tonnage:
         return expected_date_str, ""
 
