@@ -1666,7 +1666,7 @@ def debug_capacity():
     
     # 解析小范围数据 (AG:AJ)
     small_debug = []
-    for i, row in enumerate(small_rows):
+    for i, row in enumerate(small_resp.get("rows", [])):
         values = row.get("values", [])
         if values:
             def get_v(idx):
@@ -1684,7 +1684,7 @@ def debug_capacity():
     
     # 解析6月21日后小范围
     jun21_debug = []
-    for i, row in enumerate(jun21_rows):
+    for i, row in enumerate(jun21_resp.get("rows", [])):
         values = row.get("values", [])
         if values:
             def get_v(idx):
@@ -1702,7 +1702,7 @@ def debug_capacity():
     
     # 解析单行 AJ27
     single_debug = []
-    for row in single_rows:
+    for row in single_resp.get("rows", []):
         values = row.get("values", [])
         for v in values:
             cv = v.get("cellValue")
