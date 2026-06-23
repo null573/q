@@ -3,10 +3,12 @@
 根据型号、吨位、期望发货日期，从各工作表中计算可发货日期
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import json
 import os
+import re
 import requests
+import time as time_module
 
 BASE_URL = "https://docs.qq.com/openapi/spreadsheet/v3"
 FILE_ID = "DRnhDemRIS25mdnFF"
@@ -47,6 +49,30 @@ def get_headers():
         "Open-Id": os.environ.get("TENCENT_OPEN_ID", os.environ.get("OPEN_ID", "9bc172e5338147d8a35c1438ea8d1577")),
         "Client-Id": os.environ.get("TENCENT_CLIENT_ID", os.environ.get("CLIENT_ID", "da815d1227294457b43413bdc16e3e90"))
     }
+
+
+# ========== 预编译正则表达式（避免每次调用重复编译） ==========
+_DATE_RE_YYYY_MM_DD = re.compile(r'^(\d{4})年(\d{1,2})月(\d{1,2})日$')
+_DATE_RE_MM_DD = re.compile(r'^(\d{1,2})月(\d{1,2})日$')
+_DATE_RE_M_DOT_D = re.compile(r'^(\d{1,2})\.(\d{1,2})$')
+_LIMIT_CELL_RE = re.compile(r'^([A-Z]+)(\d+)$')
+
+
+# ========== 列字母→索引缓存（固定映射，避免重复计算） ==========
+_COL_INDEX_CACHE = {}
+
+
+def col_letter_to_index(col):
+    """将列字母转为0-based索引，带缓存"""
+    if col in _COL_INDEX_CACHE:
+        return _COL_INDEX_CACHE[col]
+    result = 0
+    for c in col:
+        result = result * 26 + (ord(c) - ord('A') + 1)
+    result -= 1
+    _COL_INDEX_CACHE[col] = result
+    return result
+
 
 # 型号 -> (工作表sheetId, 日期列起始行, 产能列字母, 上限日期单元格, 数据行数)
 MODEL_CONFIG = {
@@ -116,24 +142,30 @@ def read_single_cell(sheet_id, cell):
     return ""
 
 
+# 预编译日期解析格式，避免每次调用重复创建
+_DATE_FMT1 = "%Y-%m-%d"
+_DATE_FMT2 = "%Y/%m/%d"
+
+
 def parse_date(date_str):
     """解析日期字符串为date对象
-    支持格式: YYYY-MM-DD, YYYY/MM/DD, YYYY年MM月DD日, MM月DD日(默认当年)"""
+    支持格式: YYYY-MM-DD, YYYY/MM/DD, YYYY年MM月DD日, MM月DD日(默认当年), M.D"""
     s = str(date_str).strip()
     if not s:
         return None
-    from datetime import date
-    import re
 
     # 1. 标准格式 YYYY-MM-DD / YYYY/MM/DD
-    for fmt in ("%Y-%m-%d", "%Y/%m/%d"):
-        try:
-            return datetime.strptime(s, fmt).date()
-        except ValueError:
-            pass
+    try:
+        return datetime.strptime(s, _DATE_FMT1).date()
+    except ValueError:
+        pass
+    try:
+        return datetime.strptime(s, _DATE_FMT2).date()
+    except ValueError:
+        pass
 
     # 2. 中文格式: YYYY年MM月DD日
-    m = re.match(r'^(\d{4})年(\d{1,2})月(\d{1,2})日$', s)
+    m = _DATE_RE_YYYY_MM_DD.match(s)
     if m:
         try:
             return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
@@ -141,15 +173,15 @@ def parse_date(date_str):
             pass
 
     # 3. 中文格式: MM月DD日 (默认当年)
-    m = re.match(r'^(\d{1,2})月(\d{1,2})日$', s)
+    m = _DATE_RE_MM_DD.match(s)
     if m:
         try:
             return date(date.today().year, int(m.group(1)), int(m.group(2)))
         except ValueError:
             pass
 
-    # 4. 纯数字: MMDD 或 M.D (如 6.30)
-    m = re.match(r'^(\d{1,2})\.(\d{1,2})$', s)
+    # 4. 纯数字: M.D (如 6.30)
+    m = _DATE_RE_M_DOT_D.match(s)
     if m:
         try:
             return date(date.today().year, int(m.group(1)), int(m.group(2)))
@@ -167,28 +199,21 @@ def parse_number(val):
         return None
 
 
-# 缓存：工作表数据
+# ========== 缓存：工作表数据 ==========
 cache = {}
-CACHE_TTL = 60  # 60秒缓存，平衡速度和数据实时性
+CACHE_TTL = 300  # 300秒缓存（产能数据变化不频繁，延长缓存时间）
 
 
 def get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count):
     """获取工作表数据，带缓存。优化：一次性读取日期列+产能列+上限日期，减少API调用"""
     cache_key = f"{sheet_id}:{start_row}:{capacity_col}:{limit_cell}"
 
+    now = time_module.time()
     # 检查缓存
     if cache_key in cache:
         cached_data, cached_time = cache[cache_key]
-        import time
-        if time.time() - cached_time < CACHE_TTL:
+        if now - cached_time < CACHE_TTL:
             return cached_data
-
-    # 确定产能列的索引（根据列字母计算）
-    def col_letter_to_index(col):
-        result = 0
-        for c in col:
-            result = result * 26 + (ord(c) - ord('A') + 1)
-        return result - 1
 
     capacity_col_index = col_letter_to_index(capacity_col)
 
@@ -201,42 +226,39 @@ def get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count):
     # 解析数据：A列是日期，最后一列是产能
     date_capacity_map = {}
 
-    for i, row in enumerate(rows):
+    for row in rows:
         values = row.get("values", [])
         if len(values) < capacity_col_index + 1:
             continue
 
-        # 解析A列日期
-        date_val = ""
-        for v in values[0:1]:
-            cv = v.get("cellValue")
-            if cv:
-                date_val = parse_cell_value(cv)
-                break
+        # 解析A列日期（values[0]）
+        cv = values[0].get("cellValue")
+        if not cv:
+            continue
+        date_val = parse_cell_value(cv)
+        if not date_val:
+            continue
 
         # 解析产能列
-        cap_val = None
-        if len(values) > capacity_col_index:
-            cv = values[capacity_col_index].get("cellValue")
-            if cv:
-                cap_str = parse_cell_value(cv)
-                cap_val = parse_number(cap_str)
+        cv = values[capacity_col_index].get("cellValue")
+        if not cv:
+            continue
+        cap_str = parse_cell_value(cv)
+        cap_val = parse_number(cap_str)
+        if cap_val is None:
+            continue
 
-        if date_val and cap_val is not None:
-            d = parse_date(date_val)
-            if d:
-                date_capacity_map[d] = cap_val
+        d = parse_date(date_val)
+        if d:
+            date_capacity_map[d] = cap_val
 
     # 优化：上限日期从已读取的数据中提取（如果 limit_cell 在读取范围内）
-    # 解析 limit_cell 如 "M1" -> col=M, row=1
-    import re
-    limit_match = re.match(r'^([A-Z]+)(\d+)$', limit_cell)
     limit_date = None
+    limit_match = _LIMIT_CELL_RE.match(limit_cell)
     if limit_match:
         limit_col_letter = limit_match.group(1)
         limit_row_num = int(limit_match.group(2))
         limit_col_idx = col_letter_to_index(limit_col_letter)
-        # 检查上限日期单元格是否在已读取的范围内
         if limit_row_num >= start_row and limit_row_num <= end_row and limit_col_idx <= capacity_col_index:
             row_offset = limit_row_num - start_row
             if row_offset < len(rows):
@@ -256,31 +278,25 @@ def get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count):
         "limit_date": limit_date
     }
 
-    # 存入缓存
-    import time
-    cache[cache_key] = (result, time.time())
-
+    cache[cache_key] = (result, now)
     return result
 
 
 # 配置表缓存：从腾讯表格配置表读取的型号配置
 _model_config_cache = {}
 _model_config_cache_time = 0
-MODEL_CONFIG_CACHE_TTL = 60  # 60秒缓存
+MODEL_CONFIG_CACHE_TTL = 300  # 300秒缓存
 
 
 def _load_model_configs_from_sheet():
-    """从腾讯表格配置表读取型号配置（带60秒缓存）"""
-    import time
+    """从腾讯表格配置表读取型号配置（带300秒缓存）"""
     global _model_config_cache, _model_config_cache_time
 
-    now = time.time()
+    now = time_module.time()
     if _model_config_cache and (now - _model_config_cache_time < MODEL_CONFIG_CACHE_TTL):
         return _model_config_cache
 
     config_sheet_id = "dc53jt"
-    # 读取配置表：A列=型号, B列=Sheet ID, C列=起始行, D列=产能列, E列=上限日期单元格, F列=行数
-    # 标题在第1行，数据从第2行开始，读取足够多的行
     grid_data = read_sheet_range(config_sheet_id, "A2:F200")
     rows = grid_data.get("rows", [])
 
@@ -299,7 +315,6 @@ def _load_model_configs_from_sheet():
             continue
         try:
             sheet_id = cells[1].strip()
-            # 兼容用户填数字格式（如 4 → 000004）
             if sheet_id.isdigit() and len(sheet_id) < 6:
                 sheet_id = sheet_id.zfill(6)
             start_row = int(cells[2])
@@ -324,6 +339,7 @@ def _get_model_config(model):
         return sheet_configs[model]
     return None
 
+
 def calculate_delivery_date(model, tonnage_str, expected_date_str, occupied_capacity=None):
     """
     计算可发货日期
@@ -332,14 +348,12 @@ def calculate_delivery_date(model, tonnage_str, expected_date_str, occupied_capa
         model: 型号
         tonnage_str: 吨位（字符串）
         expected_date_str: 期望发货日期（字符串 YYYY-MM-DD）
-        occupied_capacity: 已占用产能字典 {date: 已占用吨位}（保留参数，库存余额型列不需要）
+        occupied_capacity: 已占用产能字典（保留参数，库存余额型列不需要）
 
     返回:
         (calculated_date_str, message)
-        calculated_date_str: 计算出的可发货日期，或"请联系商务支持"
-        message: 错误信息（如果有）
     """
-    # 1. 检查型号是否在配置中（硬编码 + 用户添加）
+    # 1. 检查型号是否在配置中
     config = _get_model_config(model)
     if not config:
         return "请联系商务支持", f"型号 {model} 暂无排产数据"
@@ -357,7 +371,7 @@ def calculate_delivery_date(model, tonnage_str, expected_date_str, occupied_capa
     # 4. 获取工作表配置
     sheet_id, start_row, capacity_col, limit_cell, row_count = config
 
-    # 5. 读取工作表数据（优化后：1次API调用）
+    # 5. 读取工作表数据（带缓存）
     sheet_data = get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count)
     date_capacity_map = sheet_data["date_capacity_map"]
     limit_date = sheet_data["limit_date"]
@@ -371,10 +385,9 @@ def calculate_delivery_date(model, tonnage_str, expected_date_str, occupied_capa
         if not limit_date:
             return "请联系商务支持", "上限日期未设置"
 
-    # 6. 公式逻辑（产能列为库存余额，已包含订单扣减，直接使用原始值）：
-    #    筛选日期在 [expected_date, limit_date] 范围内的行
-    #    如果对应库存余额的最小值 >= 吨位，返回期望日期
-    #    否则，找库存余额 < 吨位的行中最大的日期，+1天
+    # 6. 公式逻辑（产能列为库存余额，直接使用原始值）：
+    #    从期望日期开始往后找，如果所有日期的库存余额 >= 吨位，返回期望日期
+    #    否则找到库存余额 < 吨位的最大日期，+1天
 
     filtered_caps = []
     low_cap_dates = []
