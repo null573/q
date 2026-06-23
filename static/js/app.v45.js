@@ -219,6 +219,7 @@ function initApp() {
     // 绑定事件监听器
     setupEventListeners();
     setupEditQueueDateListener();
+    setupTabSwitchCleanup();
     // 启动无操作检测
     startIdleTimer();
     // 登录后空闲时预取排队明细，用户首次点开更快；不阻塞首屏表单
@@ -1389,7 +1390,7 @@ function hasUnsavedOrder() {
     return model || tonnage || customer;
 }
 
-// 清空临时行的函数（页面切换/刷新/关闭时调用）
+// 清空临时行的函数（页面关闭/刷新时立即调用）
 function clearTempRowSync() {
     if (pendingRowIndex > 0) {
         try {
@@ -1406,7 +1407,7 @@ function clearTempRowSync() {
     }
 }
 
-// 页面关闭/刷新前
+// 页面关闭/刷新前：立即清空临时行
 window.addEventListener('beforeunload', function(e) {
     if (hasUnsavedOrder()) {
         clearTempRowSync();
@@ -1414,22 +1415,52 @@ window.addEventListener('beforeunload', function(e) {
     }
 });
 
-// 页面隐藏时（切换标签页、最小化等）
-window.addEventListener('pagehide', function(e) {
-    if (hasUnsavedOrder()) {
-        clearTempRowSync();
-    }
-});
+// 系统内切换标签页（订单排队/排队明细/问题反馈）：立即清空临时行
+// 通过监听tab切换按钮点击事件
+function setupTabSwitchCleanup() {
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            if (hasUnsavedOrder() && pendingRowIndex > 0) {
+                // 异步清空临时行
+                fetch(`${API_BASE}/api/clear-temp-row`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Access-Password': accessPassword,
+                        'X-Employee-Id': employeeId
+                    },
+                    body: JSON.stringify({ row_index: pendingRowIndex })
+                }).catch(() => {});
+                pendingRowIndex = 0;
+            }
+        });
+    });
+}
 
-// 页面可见性变化时（切换标签页）
+// 页面可见性变化时（切换浏览器窗口/标签页）：5分钟后清空
+let tabSwitchTimer = null;
 document.addEventListener('visibilitychange', function() {
     if (document.visibilityState === 'hidden' && hasUnsavedOrder()) {
-        // 使用sendBeacon确保请求发送（比同步XHR更可靠）
-        if (pendingRowIndex > 0 && navigator.sendBeacon) {
-            const data = JSON.stringify({ row_index: pendingRowIndex });
-            const blob = new Blob([data], { type: 'application/json' });
-            navigator.sendBeacon(`${API_BASE}/api/clear-temp-row`, blob);
-            pendingRowIndex = 0;
+        // 页面隐藏时启动5分钟定时器
+        if (!tabSwitchTimer) {
+            tabSwitchTimer = setTimeout(() => {
+                if (pendingRowIndex > 0) {
+                    // 使用sendBeacon确保请求发送
+                    if (navigator.sendBeacon) {
+                        const data = JSON.stringify({ row_index: pendingRowIndex });
+                        const blob = new Blob([data], { type: 'application/json' });
+                        navigator.sendBeacon(`${API_BASE}/api/clear-temp-row`, blob);
+                    }
+                    pendingRowIndex = 0;
+                }
+                tabSwitchTimer = null;
+            }, 5 * 60 * 1000); // 5分钟
+        }
+    } else if (document.visibilityState === 'visible') {
+        // 页面重新可见时，取消定时器
+        if (tabSwitchTimer) {
+            clearTimeout(tabSwitchTimer);
+            tabSwitchTimer = null;
         }
     }
 });

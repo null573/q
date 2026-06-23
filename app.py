@@ -558,36 +558,126 @@ def clear_temp_row(row_index_1based):
 def write_order_row(row_index_0based, model, tonnage, customer, expected_date, calculated_date, queue_date, submitter, remark, serial_no, submitter_id, submit_time):
     """写入一行完整订单数据到腾讯表格（row_index_0based从0开始）
     E列（可发货日期）由腾讯表格公式计算，不覆盖
+    使用updateCellsRequest只更新特定单元格，避免覆盖E列公式
     """
     queue_date_is_date = is_date_string(queue_date)
 
-    row_values = [
-        build_cell_value(model),                        # A: 型号
-        build_cell_value(tonnage, is_number=True),      # B: 吨位
-        build_cell_value(customer),                      # C: 客户
-        build_cell_value(expected_date, is_date=True),  # D: 期望发货日期
-        # E列不写入，保留公式
-        build_cell_value(queue_date, is_date=queue_date_is_date),  # F: 排队日期
-        build_cell_value(submitter),                     # G: 提交人
-        build_cell_value(remark),                        # H: 备注
-        build_cell_value(serial_no),                     # I: 序号
-        build_cell_value(""),                            # J: 上次录入
-        build_cell_value(submitter_id),                  # K: 提交人ID
-        build_cell_value(submit_time),                   # L: 提交时间
-    ]
+    # 使用updateCellsRequest，只更新需要写入的单元格（跳过E列）
+    requests = []
 
-    body = {
-        "requests": [{
-            "updateRangeRequest": {
-                "sheetId": SHEET_ID,
-                "gridData": {
-                    "startRow": row_index_0based,
-                    "startColumn": 0,
-                    "rows": [{"values": row_values}]
-                }
-            }
-        }]
-    }
+    # A列: 型号
+    requests.append({
+        "updateCellsRequest": {
+            "sheetId": SHEET_ID,
+            "rows": [{"values": [build_cell_value(model)]}],
+            "fields": "*",
+            "start": {"rowIndex": row_index_0based, "columnIndex": 0}
+        }
+    })
+
+    # B列: 吨位
+    requests.append({
+        "updateCellsRequest": {
+            "sheetId": SHEET_ID,
+            "rows": [{"values": [build_cell_value(tonnage, is_number=True)]}],
+            "fields": "*",
+            "start": {"rowIndex": row_index_0based, "columnIndex": 1}
+        }
+    })
+
+    # C列: 客户
+    requests.append({
+        "updateCellsRequest": {
+            "sheetId": SHEET_ID,
+            "rows": [{"values": [build_cell_value(customer)]}],
+            "fields": "*",
+            "start": {"rowIndex": row_index_0based, "columnIndex": 2}
+        }
+    })
+
+    # D列: 期望发货日期
+    requests.append({
+        "updateCellsRequest": {
+            "sheetId": SHEET_ID,
+            "rows": [{"values": [build_cell_value(expected_date, is_date=True)]}],
+            "fields": "*",
+            "start": {"rowIndex": row_index_0based, "columnIndex": 3}
+        }
+    })
+
+    # E列: 不更新，保留公式
+
+    # F列: 排队日期
+    requests.append({
+        "updateCellsRequest": {
+            "sheetId": SHEET_ID,
+            "rows": [{"values": [build_cell_value(queue_date, is_date=queue_date_is_date)]}],
+            "fields": "*",
+            "start": {"rowIndex": row_index_0based, "columnIndex": 5}
+        }
+    })
+
+    # G列: 提交人
+    requests.append({
+        "updateCellsRequest": {
+            "sheetId": SHEET_ID,
+            "rows": [{"values": [build_cell_value(submitter)]}],
+            "fields": "*",
+            "start": {"rowIndex": row_index_0based, "columnIndex": 6}
+        }
+    })
+
+    # H列: 备注
+    requests.append({
+        "updateCellsRequest": {
+            "sheetId": SHEET_ID,
+            "rows": [{"values": [build_cell_value(remark)]}],
+            "fields": "*",
+            "start": {"rowIndex": row_index_0based, "columnIndex": 7}
+        }
+    })
+
+    # I列: 序号
+    requests.append({
+        "updateCellsRequest": {
+            "sheetId": SHEET_ID,
+            "rows": [{"values": [build_cell_value(serial_no)]}],
+            "fields": "*",
+            "start": {"rowIndex": row_index_0based, "columnIndex": 8}
+        }
+    })
+
+    # J列: 上次录入（空）
+    requests.append({
+        "updateCellsRequest": {
+            "sheetId": SHEET_ID,
+            "rows": [{"values": [build_cell_value("")]}],
+            "fields": "*",
+            "start": {"rowIndex": row_index_0based, "columnIndex": 9}
+        }
+    })
+
+    # K列: 提交人ID
+    requests.append({
+        "updateCellsRequest": {
+            "sheetId": SHEET_ID,
+            "rows": [{"values": [build_cell_value(submitter_id)]}],
+            "fields": "*",
+            "start": {"rowIndex": row_index_0based, "columnIndex": 10}
+        }
+    })
+
+    # L列: 提交时间
+    requests.append({
+        "updateCellsRequest": {
+            "sheetId": SHEET_ID,
+            "rows": [{"values": [build_cell_value(submit_time)]}],
+            "fields": "*",
+            "start": {"rowIndex": row_index_0based, "columnIndex": 11}
+        }
+    })
+
+    body = {"requests": requests}
     return batch_update(body)
 
 
