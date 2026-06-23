@@ -498,7 +498,17 @@ async function calculateDate() {
         return;
     }
 
+    // 计算开始时，清空可发货日期和输入发货日期排队
     document.getElementById('calculatedDate').value = '计算中...';
+    const queueDateInput = document.getElementById('queueDate');
+    queueDateInput.value = '';
+    queueDateInput.disabled = true;
+    queueDateInput.style.background = '#e9ecef';
+    queueDateInput.style.cursor = 'not-allowed';
+    queueDateInput.placeholder = '计算中...';
+    // 清除之前的提示
+    const oldHint = queueDateInput.parentNode.querySelector('.queue-date-hint');
+    if (oldHint) oldHint.remove();
 
     try {
         const response = await apiFetch(`${API_BASE}/api/calculate-date`, {
@@ -521,13 +531,12 @@ async function calculateDate() {
 
             // 检查E列结果是否为有效日期
             const isDate = calcDate && calcDate.match(/\d{4}-\d{2}-\d{2}/);
-            const queueDateInput = document.getElementById('queueDate');
             if (!isDate && calcDate) {
                 // 公式返回非日期文本（如错误信息）
                 queueDateInput.style.display = 'none';
                 const parent = queueDateInput.parentNode;
-                const oldHint = parent.querySelector('.queue-date-hint');
-                if (oldHint) oldHint.remove();
+                const oldHint2 = parent.querySelector('.queue-date-hint');
+                if (oldHint2) oldHint2.remove();
                 const hint = document.createElement('input');
                 hint.type = 'text';
                 hint.className = 'queue-date-hint';
@@ -543,20 +552,24 @@ async function calculateDate() {
                 queueDateInput.style.cursor = 'text';
                 queueDateInput.placeholder = '点击选择日期';
                 queueDateInput.value = calcDate;
-                const oldHint = queueDateInput.parentNode.querySelector('.queue-date-hint');
-                if (oldHint) oldHint.remove();
+                const oldHint2 = queueDateInput.parentNode.querySelector('.queue-date-hint');
+                if (oldHint2) oldHint2.remove();
             } else {
                 queueDateInput.style.display = '';
                 queueDateInput.disabled = false;
                 queueDateInput.style.background = '#fff';
                 queueDateInput.style.cursor = 'text';
                 queueDateInput.placeholder = '点击选择日期';
-                const oldHint = queueDateInput.parentNode.querySelector('.queue-date-hint');
-                if (oldHint) oldHint.remove();
+                const oldHint2 = queueDateInput.parentNode.querySelector('.queue-date-hint');
+                if (oldHint2) oldHint2.remove();
             }
         } else {
             document.getElementById('calculatedDate').value = '计算失败';
             pendingRowIndex = 0;
+            queueDateInput.disabled = true;
+            queueDateInput.style.background = '#e9ecef';
+            queueDateInput.style.cursor = 'not-allowed';
+            queueDateInput.placeholder = '计算失败，请重试';
         }
     } catch (error) {
         if (myVersion !== calcVersion) {
@@ -565,6 +578,10 @@ async function calculateDate() {
         }
         document.getElementById('calculatedDate').value = '计算失败';
         pendingRowIndex = 0;
+        queueDateInput.disabled = true;
+        queueDateInput.style.background = '#e9ecef';
+        queueDateInput.style.cursor = 'not-allowed';
+        queueDateInput.placeholder = '计算失败，请重试';
     }
     pendingCalcs--;
 }
