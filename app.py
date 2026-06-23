@@ -1670,7 +1670,7 @@ def test_connection():
 
 
 def _warmup_keepalive():
-    """后台线程：启动时预热建立初始缓存"""
+    """后台线程：启动时预热建立初始缓存 + 定期keepalive防止Render休眠"""
     import threading
     def run():
         # 启动时等待服务完全就绪，然后尝试预热10次建立初始缓存
@@ -1684,6 +1684,25 @@ def _warmup_keepalive():
             except Exception as e:
                 print(f"[warmup] 初始预热失败(attempt {attempt+1}): {e}")
             time.sleep(3)
+
+        # 定期keepalive：每4分50秒访问一次自身，防止Render免费版休眠（休眠阈值约5分钟）
+        import requests as req
+        keepalive_url = os.environ.get('KEEPALIVE_URL', '')
+        if not keepalive_url:
+            # 自动检测自身URL
+            try:
+                r = req.get('https://q-en4c.onrender.com/', timeout=10)
+                keepalive_url = 'https://q-en4c.onrender.com'
+            except:
+                keepalive_url = ''
+        if keepalive_url:
+            print(f"[keepalive] 启动定期保活: {keepalive_url}")
+            while True:
+                time.sleep(290)  # 4分50秒
+                try:
+                    req.get(keepalive_url, timeout=10)
+                except:
+                    pass
     t = threading.Thread(target=run, daemon=True)
     t.start()
 
