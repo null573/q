@@ -562,9 +562,29 @@ def read_calculated_date_from_row(row_index_1based):
 
 
 def clear_temp_row(row_index_1based):
-    """清空临时写入的行（只清空A/B/D列，不动E列公式）"""
+    """清空临时写入的行（只清空A/B/D列，不动E列公式）
+    安全机制：如果该行已提交（K列有提交人ID），则不清空
+    """
     if row_index_1based < 2:
         return
+
+    # 安全机制：检查该行是否已提交（K列是否有提交人ID）
+    try:
+        grid_data = read_sheet_range(SHEET_ID, f"K{row_index_1based}:K{row_index_1based}")
+        rows = grid_data.get("rows", [])
+        if rows and len(rows) > 0:
+            values = rows[0].get("values", [])
+            if values:
+                cv = values[0].get("cellValue")
+                if cv and parse_cell_value(cv).strip():
+                    # K列有值，说明该行已提交，不清理
+                    print(f"[clear_temp_row] 跳过已提交行 row={row_index_1based}")
+                    return
+    except Exception as e:
+        print(f"[clear_temp_row] 检查行状态失败 row={row_index_1based}: {e}")
+        # 检查失败时，不清理（安全优先）
+        return
+
     requests = [
         # 清空A-D列
         {
