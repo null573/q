@@ -486,11 +486,21 @@ def ensure_sheet_rows(min_row_count):
 
 
 def is_date_string(value):
-    """判断字符串是否为日期格式 YYYY-MM-DD"""
+    """判断字符串是否为日期格式 YYYY-MM-DD 或 YYYY年M月D日"""
     if not value:
         return False
     import re
-    return bool(re.match(r'^\d{4}-\d{2}-\d{2}$', str(value).strip()))
+    text = str(value).strip()
+    # 标准格式
+    if re.match(r'^\d{4}-\d{2}-\d{2}$', text):
+        return True
+    # 中文格式（如 2026年6月25日）
+    if re.match(r'^\d{4}年\d{1,2}月\d{1,2}日$', text):
+        return True
+    # 短格式（如 6月25日）
+    if re.match(r'^\d{1,2}月\d{1,2}日$', text):
+        return True
+    return False
 
 
 def write_temp_row(row_index_0based, model, tonnage, expected_date):
@@ -814,7 +824,7 @@ def calculate_date():
 
         # 3. 等待公式计算完成（腾讯表格公式计算有延迟，轮询读取E列）
         calculated_date = ""
-        max_wait = 10  # 最多等待10秒
+        max_wait = 15  # 最多等待15秒
         wait_interval = 0.5  # 每0.5秒检查一次
         elapsed = 0
 
