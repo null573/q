@@ -561,47 +561,6 @@ def read_calculated_date_from_row(row_index_1based):
     return ""
 
 
-def _find_user_temp_row_in_sheet(submitter_id):
-    """扫描腾讯表格，查找该用户的临时行（Render重启后内存缓存丢失时的兜底）
-    条件：A列有值（型号），F列为空（未提交排队）
-    优化：一次性读取A:F列，不逐行查询
-    """
-    try:
-        batch_size = 50
-        for offset in range(0, 500, batch_size):  # 只扫描前500行（临时行通常在前面）
-            start = offset + 1
-            end = offset + batch_size
-            # 一次性读取A:F列
-            range_str = f"A{start}:F{end}"
-            grid_data = read_sheet_range(SHEET_ID, range_str)
-            rows = grid_data.get("rows", [])
-            if not rows:
-                break
-
-            for i in range(len(rows)):
-                actual_row = start + i
-                if actual_row < 3:
-                    continue
-                values = rows[i].get("values", [])
-                if not values or len(values) < 6:
-                    continue
-                # A列有值（型号）
-                a_cv = values[0].get("cellValue")
-                if a_cv:
-                    a_val = parse_cell_value(a_cv)
-                    if a_val and a_val.strip():
-                        # F列为空（未提交排队）
-                        f_cv = values[5].get("cellValue")
-                        f_val = parse_cell_value(f_cv) if f_cv else ""
-                        if not f_val.strip():
-                            return actual_row
-
-            if len(rows) < batch_size:
-                break
-    except Exception as e:
-        print(f"[find_temp_row] 扫描临时行失败: {e}", flush=True)
-    return 0
-
 
 def clear_temp_row(row_index_1based):
     """清空临时写入的行（只清空A/B/D列，不动E列公式）
@@ -893,11 +852,7 @@ def calculate_date():
                     if now - tracked["timestamp"] < _TEMP_ROW_TIMEOUT:
                         target_row = tracked["row_index"]
 
-        # 如果没有找到行，先扫描表格找该用户的临时行（Render重启后内存缓存丢失）
-        if target_row == 0 and submitter_id:
-            target_row = _find_user_temp_row_in_sheet(submitter_id)
-
-        # 如果还是没有，找空行
+        # 如果没有找到行，找空行
         if target_row == 0:
             target_row = get_next_empty_row(SHEET_ID, start_from=2)
             ensure_sheet_rows(target_row + 10)
