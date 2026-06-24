@@ -2217,7 +2217,7 @@ def _warmup_calc_engine_cache():
     """后台预热 calc_engine 缓存，消除首次用户请求的 2-3 秒延迟"""
     try:
         import time as _t
-        _t.sleep(8)  # 等待应用完全启动后再预热
+        _t.sleep(3)  # 等待应用启动后立即预热
         models = list(MODEL_CONFIG.keys())
         warmed = 0
         for model in models:
