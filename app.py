@@ -561,6 +561,52 @@ def read_calculated_date_from_row(row_index_1based):
     return ""
 
 
+def _find_user_temp_row_in_sheet(submitter_id):
+    """扫描腾讯表格，查找该用户的临时行（Render重启后内存缓存丢失时的兜底）
+    条件：A列有值（型号），F列为空（未提交排队），K列等于submitter_id
+    """
+    try:
+        batch_size = 50
+        for offset in range(0, 2000, batch_size):
+            start = offset + 1
+            end = offset + batch_size
+            # 读取A/F/K列
+            range_str = f"A{start}:A{end}"
+            grid_data = read_sheet_range(SHEET_ID, range_str)
+            rows = grid_data.get("rows", [])
+            if not rows:
+                break
+
+            for i in range(len(rows)):
+                actual_row = start + i
+                if actual_row < 3:
+                    continue
+                values = rows[i].get("values", [])
+                if not values:
+                    continue
+                cv = values[0].get("cellValue")
+                if cv:
+                    a_val = parse_cell_value(cv)
+                    if a_val and a_val.strip():
+                        # A列有值，检查F列是否为空（未提交）
+                        f_range = f"F{actual_row}:F{actual_row}"
+                        f_grid = read_sheet_range(SHEET_ID, f_range)
+                        f_rows = f_grid.get("rows", [])
+                        f_val = ""
+                        if f_rows and f_rows[0].get("values"):
+                            f_cv = f_rows[0]["values"][0].get("cellValue")
+                            if f_cv:
+                                f_val = parse_cell_value(f_cv)
+                        if not f_val.strip():
+                            return actual_row
+
+            if len(rows) < batch_size:
+                break
+    except Exception as e:
+        print(f"[find_temp_row] 扫描临时行失败: {e}", flush=True)
+    return 0
+
+
 def clear_temp_row(row_index_1based):
     """清空临时写入的行（只清空A/B/D列，不动E列公式）
     安全机制：如果该行已提交（K列有提交人ID），则不清空
@@ -838,7 +884,7 @@ def calculate_date():
         # 优先使用前端传入的pending_row_index（当前正在编辑的行）
         # 如果前端没有传入，查找该用户的临时行（不区分型号，因为用户可能在修改型号）
         target_row = 0
-        temp_key = f"{submitter_id}:{model}"
+        temp_key = f"{submitter_id}"  # 不区分型号，同一用户复用同一临时行
 
         if pending_row_index > 0:
             # 前端传入了当前行号，直接使用（用户正在编辑这一行）
@@ -851,18 +897,36 @@ def calculate_date():
                     if now - tracked["timestamp"] < _TEMP_ROW_TIMEOUT:
                         target_row = tracked["row_index"]
 
-        # 如果没有找到行，找空行
+        # 如果没有找到行，先扫描表格找该用户的临时行（Render重启后内存缓存丢失）
+        if target_row == 0 and submitter_id:
+            target_row = _find_user_temp_row_in_sheet(submitter_id)
+
+        # 如果还是没有，找空行
         if target_row == 0:
             target_row = get_next_empty_row(SHEET_ID, start_from=2)
             ensure_sheet_rows(target_row + 10)
 
-        # 2. 写入临时数据（A/B/D列），触发腾讯表格公式计算
+        # 2. 缓存预查：如果同一参数已有结果且未过期，直接返回（避免重复写入+轮询）
+        cache_key = f"{model}:{tonnage}:{expected_date}"
+        if not force_refresh:
+            import time as _time_module_calc
+            if (_calc_result_cache.get("key") == cache_key
+                and _calc_result_cache.get("result")
+                and _time_module_calc.time() - _calc_result_cache.get("timestamp", 0) < _CALC_CACHE_TTL):
+                return jsonify({
+                    "success": True,
+                    "calculated_date": _calc_result_cache["result"],
+                    "row_index": target_row,
+                    "message": ""
+                })
+
+        # 3. 写入临时数据（A/B/D列），触发腾讯表格公式计算
         write_resp = write_temp_row(target_row - 1, model, tonnage, expected_date)
         write_result = write_resp.json()
         if "responses" not in write_result:
             return jsonify({"success": False, "error": "写入临时数据失败"})
 
-        # 3. 等待公式计算完成（腾讯表格公式计算有延迟，轮询读取E列）
+        # 4. 等待公式计算完成（腾讯表格公式计算有延迟，轮询读取E列）
         calculated_date = ""
         max_wait = 15  # 最多等待15秒
 
@@ -871,7 +935,7 @@ def calculate_date():
         if e_value and e_value.strip():
             if is_date_string(e_value):
                 calculated_date = e_value
-            elif e_value not in ["", "计算中..."]:
+            elif e_value not in ["", "计算中...", "#REF!", "#N/A", "#VALUE!"]:
                 calculated_date = e_value
 
         if not calculated_date:
@@ -885,30 +949,11 @@ def calculate_date():
                     if is_date_string(e_value):
                         calculated_date = e_value
                         break
-                    elif e_value not in ["", "计算中..."]:
+                    elif e_value not in ["", "计算中...", "#REF!", "#N/A", "#VALUE!"]:
                         calculated_date = e_value
                         break
 
-        # 3.5 缓存查询：如果同一参数已有结果且未过期，直接返回
-        if not force_refresh:
-            cache_key = f"{model}:{tonnage}:{expected_date}"
-            import time as _time_module_calc
-            if (_calc_result_cache.get("key") == cache_key
-                and _calc_result_cache.get("result")
-                and _time_module_calc.time() - _calc_result_cache.get("timestamp", 0) < _CALC_CACHE_TTL):
-                # 清理临时行（之前写入但未使用的）
-                try:
-                    clear_temp_row(target_row)
-                except:
-                    pass
-                return jsonify({
-                    "success": True,
-                    "calculated_date": _calc_result_cache["result"],
-                    "row_index": 0,
-                    "message": ""
-                })
-
-        # 4. 记录临时行信息
+        # 5. 记录临时行信息
         with _temp_row_lock:
             _temp_row_tracker[temp_key] = {
                 "row_index": target_row,
@@ -1046,7 +1091,7 @@ def create_order():
             return jsonify({"success": False, "error": "未找到目标行，请先计算可发货日期"})
 
         # 检查目标行是否被当前用户的临时数据占用
-        temp_key = f"{submitter_id}:{model}"
+        temp_key = f"{submitter_id}"  # 不区分型号，同一用户复用同一临时行
         with _temp_row_lock:
             if temp_key in _temp_row_tracker:
                 tracked_row = _temp_row_tracker[temp_key]["row_index"]
