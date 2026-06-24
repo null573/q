@@ -2213,6 +2213,29 @@ def save_model_config():
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
+def _warmup_calc_engine_cache():
+    """后台预热 calc_engine 缓存，消除首次用户请求的 2-3 秒延迟"""
+    try:
+        import time as _t
+        _t.sleep(8)  # 等待应用完全启动后再预热
+        models = list(MODEL_CONFIG.keys())
+        warmed = 0
+        for model in models:
+            try:
+                calculate_delivery_date(model, "1", "2026-07-01")
+                warmed += 1
+            except Exception:
+                pass
+        print(f"[warmup] calc_engine cache warmed for {warmed}/{len(models)} models", flush=True)
+    except Exception as e:
+        print(f"[warmup] calc_engine cache warmup failed: {e}", flush=True)
+
+
+# 模块加载时启动后台预热线程（同时兼容 Flask dev server 和 gunicorn）
+_warmup_thread = threading.Thread(target=_warmup_calc_engine_cache, daemon=True)
+_warmup_thread.start()
+
+
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
 
