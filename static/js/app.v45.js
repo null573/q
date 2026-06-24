@@ -1407,12 +1407,40 @@ function clearTempRowSync() {
     }
 }
 
-// 页面关闭/刷新前：立即清空临时行
+// 页面关闭/刷新前：使用sendBeacon清空临时行（比同步XHR更可靠）
 window.addEventListener('beforeunload', function(e) {
-    if (hasUnsavedOrder()) {
-        clearTempRowSync();
-        document.getElementById('orderForm').reset();
+    if (hasUnsavedOrder() && pendingRowIndex > 0) {
+        // 使用sendBeacon确保请求发送
+        if (navigator.sendBeacon) {
+            const data = JSON.stringify({ row_index: pendingRowIndex });
+            const blob = new Blob([data], { type: 'application/json' });
+            navigator.sendBeacon(`${API_BASE}/api/clear-temp-row`, blob);
+        } else {
+            // 降级：同步XHR
+            clearTempRowSync();
+        }
+        pendingRowIndex = 0;
     }
+});
+
+// 页面加载时：清理当前用户之前遗留的临时行（防止刷新后残留）
+window.addEventListener('load', function() {
+    // 页面加载后，如果有未提交的表单数据，清理之前的临时行
+    // 因为刷新后pendingRowIndex会重置为0，但腾讯表格中可能还有残留数据
+    setTimeout(() => {
+        if (currentUser.id) {
+            // 调用API清理当前用户所有过期的临时行
+            fetch(`${API_BASE}/api/cleanup-user-temp-rows`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Access-Password': accessPassword,
+                    'X-Employee-Id': employeeId
+                },
+                body: JSON.stringify({ submitter_id: currentUser.id })
+            }).catch(() => {});
+        }
+    }, 1000);
 });
 
 // 系统内切换标签页（订单排队/排队明细/问题反馈）：不清空临时行

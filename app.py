@@ -915,6 +915,46 @@ def clear_temp_row_api():
         return jsonify({"success": False, "error": str(e)})
 
 
+@app.route('/api/cleanup-user-temp-rows', methods=['POST'])
+@require_auth
+def cleanup_user_temp_rows():
+    """清理当前用户所有遗留的临时行（页面加载时调用）"""
+    try:
+        data = request.json or {}
+        submitter_id = data.get('submitter_id', '')
+
+        if not submitter_id:
+            return jsonify({"success": True, "message": "无用户ID"})
+
+        # 找到该用户所有过期的临时行（超过5分钟）
+        import time
+        now = time.time()
+        expired_rows = []
+
+        with _temp_row_lock:
+            keys_to_remove = []
+            for key, info in _temp_row_tracker.items():
+                if info["submitter_id"] == submitter_id:
+                    # 检查是否超时（超过5分钟）
+                    if now - info["timestamp"] > _TEMP_ROW_TIMEOUT:
+                        expired_rows.append(info["row_index"])
+                        keys_to_remove.append(key)
+
+            for key in keys_to_remove:
+                del _temp_row_tracker[key]
+
+        # 清空过期的临时行
+        for row_index in expired_rows:
+            try:
+                clear_temp_row(row_index)
+            except Exception as e:
+                print(f"[cleanup] 清空临时行失败 row={row_index}: {e}")
+
+        return jsonify({"success": True, "cleared_rows": expired_rows})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
 @app.route('/api/orders', methods=['POST'])
 @require_auth
 def create_order():
