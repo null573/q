@@ -316,7 +316,26 @@ def parse_cell_value(cell_value):
     if not cell_value:
         return ""
     if "text" in cell_value:
-        return cell_value["text"]
+        text = cell_value["text"]
+        # 如果text是日期格式（如 6月26日），转换为标准格式
+        import re
+        # 匹配 "6月26日" 格式
+        match = re.match(r'^(\d{1,2})月(\d{1,2})日$', text.strip())
+        if match:
+            month = int(match.group(1))
+            day = int(match.group(2))
+            # 使用当前年份
+            from datetime import datetime
+            year = datetime.now().year
+            return f"{year}-{month:02d}-{day:02d}"
+        # 匹配 "2026年6月26日" 格式
+        match = re.match(r'^(\d{4})年(\d{1,2})月(\d{1,2})日$', text.strip())
+        if match:
+            year = int(match.group(1))
+            month = int(match.group(2))
+            day = int(match.group(3))
+            return f"{year}-{month:02d}-{day:02d}"
+        return text
     if "number" in cell_value:
         return str(cell_value["number"])
     if "time" in cell_value:
