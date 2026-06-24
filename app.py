@@ -406,8 +406,13 @@ def read_sheet_range(sheet_id, range_str):
 
 def get_next_empty_row(sheet_id, start_from=2):
     """获取表格下一个空行号（1-based），从A列第一个空行开始扫描（跳过表头第1行）
-    优化：增大批次到500行，减少API调用次数
+    优化：增大批次到500行，减少API调用次数；使用缓存避免重复扫描
     安全：start_from 参数允许调用方指定从哪行开始扫描，避免多人并发时依赖全局缓存"""
+    now = time.time()
+    cached_row = _next_empty_row_cache["row"]
+    if cached_row > 0 and cached_row >= start_from and (now - _next_empty_row_cache["timestamp"]) < _NEXT_EMPTY_ROW_CACHE_TTL:
+        return cached_row
+
     batch_size = 500
     for offset in range(start_from - 1, 2000, batch_size):
         start = offset + 1  # 1-based
@@ -430,6 +435,8 @@ def get_next_empty_row(sheet_id, start_from=2):
                         has_data = True
                         break
             if not has_data:
+                _next_empty_row_cache["row"] = actual_row
+                _next_empty_row_cache["timestamp"] = now
                 return actual_row
 
     return 2001  # 如果前2000行都满了
@@ -750,6 +757,10 @@ _TEMP_ROW_TIMEOUT = 300  # 5分钟超时（秒）
 _sheet_row_count_cache = {"count": 0}
 _sheet_row_count_lock = threading.Lock()
 
+# 空行扫描结果缓存（避免每次计算都扫描表格）
+_next_empty_row_cache = {"row": 0, "timestamp": 0}
+_NEXT_EMPTY_ROW_CACHE_TTL = 60
+
 def _get_pending_rows():
     """获取所有待处理行（F列为空的行），带缓存"""
     import time
@@ -1066,6 +1077,8 @@ def clear_order_caches():
     _filtered_cache["timestamp"] = 0
     _pending_row_cache["data"] = None
     _pending_row_cache["timestamp"] = 0
+    _next_empty_row_cache["row"] = 0
+    _next_empty_row_cache["timestamp"] = 0
 
 
 def clear_user_caches():
@@ -2214,7 +2227,7 @@ def save_model_config():
         return jsonify({"success": False, "error": str(e)})
 
 def _warmup_calc_engine_cache():
-    """后台预热 calc_engine 缓存，消除首次用户请求的 2-3 秒延迟"""
+    """后台预热 calc_engine 缓存和空行扫描，消除首次用户请求的延迟"""
     try:
         import time as _t
         _t.sleep(3)  # 等待应用启动后立即预热
@@ -2227,6 +2240,13 @@ def _warmup_calc_engine_cache():
             except Exception:
                 pass
         print(f"[warmup] calc_engine cache warmed for {warmed}/{len(models)} models", flush=True)
+
+        # 预热空行扫描缓存
+        try:
+            row = get_next_empty_row(SHEET_ID, start_from=2)
+            print(f"[warmup] next empty row pre-scanned: {row}", flush=True)
+        except Exception as e:
+            print(f"[warmup] empty row scan failed: {e}", flush=True)
     except Exception as e:
         print(f"[warmup] calc_engine cache warmup failed: {e}", flush=True)
 
