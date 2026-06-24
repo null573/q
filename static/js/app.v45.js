@@ -1,4 +1,4 @@
-﻿﻿let currentUser = { name: '用户', id: '' };
+﻿let currentUser = { name: '用户', id: '' };
 let allOrders = [];
 let cachedMineOrders = [];  // 我的排队缓存
 let cachedAllOrders = [];   // 全部排队缓存
@@ -515,7 +515,7 @@ async function calculateDate() {
         const response = await apiFetch(`${API_BASE}/api/calculate-date`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model, tonnage, customer, expected_date: expectedDate, pending_row_index: pendingRowIndex, submitter_id: currentUser.id, force_refresh: true })
+            body: JSON.stringify({ model, tonnage, customer, expected_date: expectedDate, pending_row_index: pendingRowIndex, submitter_id: currentUser.id, force_refresh: false })
         });
         const data = await response.json();
         

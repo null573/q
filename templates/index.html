@@ -11,7 +11,7 @@
     <script>
         // 版本检查：如果服务器版本更新，自动刷新页面
         (function(){
-            var serverVersion = 44;
+            var serverVersion = 45;
             var localVersion = parseInt(localStorage.getItem('app_version') || '0');
             if (localVersion && localVersion < serverVersion) {
                 localStorage.setItem('app_version', serverVersion);

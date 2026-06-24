@@ -9,7 +9,7 @@ import functools
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from calc_engine import MODEL_CONFIG, calculate_delivery_date, set_token_getter
+from calc_engine import MODEL_CONFIG, calculate_delivery_date, set_token_getter, clear_cache as clear_calc_cache
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
@@ -819,7 +819,7 @@ def _get_pending_rows():
 @app.route('/api/calculate-date', methods=['POST'])
 @require_auth
 def calculate_date():
-    """计算可发货日期：写入A/B/D列到腾讯表格触发公式计算，然后读取E列结果"""
+    """计算可发货日期：直接使用本地 calc_engine 计算，省去写入腾讯表格+轮询的延迟"""
     try:
         data = request.json
         model = data.get('model', '')
@@ -832,38 +832,13 @@ def calculate_date():
         import time
         now = time.time()
 
-        # 清理超时的临时行
-        _cleanup_expired_temp_rows()
-
-        # 1. 确定目标行：始终复用同一行（只要没提交）
-        # 优先使用前端传入的pending_row_index（当前正在编辑的行）
-        # 如果前端没有传入，查找该用户的临时行（不区分型号，因为用户可能在修改型号）
-        target_row = 0
-        temp_key = f"{submitter_id}"  # 不区分型号，同一用户复用同一临时行
-
-        if pending_row_index > 0:
-            # 前端传入了当前行号，直接使用（用户正在编辑这一行）
-            target_row = pending_row_index
-        else:
-            # 检查是否已有该用户+型号的临时行
-            with _temp_row_lock:
-                if temp_key in _temp_row_tracker:
-                    tracked = _temp_row_tracker[temp_key]
-                    if now - tracked["timestamp"] < _TEMP_ROW_TIMEOUT:
-                        target_row = tracked["row_index"]
-
-        # 如果没有找到行，找空行
-        if target_row == 0:
-            target_row = get_next_empty_row(SHEET_ID, start_from=2)
-            ensure_sheet_rows(target_row + 10)
-
-        # 2. 缓存预查：如果同一参数已有结果且未过期，直接返回（避免重复写入+轮询）
+        # 缓存预查：如果同一参数已有结果且未过期，直接返回
         cache_key = f"{model}:{tonnage}:{expected_date}"
         if not force_refresh:
-            import time as _time_module_calc
             if (_calc_result_cache.get("key") == cache_key
                 and _calc_result_cache.get("result")
-                and _time_module_calc.time() - _calc_result_cache.get("timestamp", 0) < _CALC_CACHE_TTL):
+                and time.time() - _calc_result_cache.get("timestamp", 0) < _CALC_CACHE_TTL):
+                target_row = _get_or_allocate_row(pending_row_index, submitter_id, now)
                 return jsonify({
                     "success": True,
                     "calculated_date": _calc_result_cache["result"],
@@ -871,50 +846,18 @@ def calculate_date():
                     "message": ""
                 })
 
-        # 3. 写入临时数据（A/B/D列），触发腾讯表格公式计算
-        write_resp = write_temp_row(target_row - 1, model, tonnage, expected_date)
-        write_result = write_resp.json()
-        if "responses" not in write_result:
-            return jsonify({"success": False, "error": "写入临时数据失败"})
+        # 强制刷新时清除 calc_engine 内部缓存，确保读取最新产能数据
+        if force_refresh:
+            clear_calc_cache()
 
-        # 4. 等待公式计算完成（腾讯表格公式计算有延迟，轮询读取E列）
-        calculated_date = ""
-        max_wait = 15  # 最多等待15秒
+        # 直接使用本地计算引擎计算可发货日期（毫秒级）
+        calculated_date, message = calculate_delivery_date(model, tonnage, expected_date)
 
-        # 优化：先立即检查一次，如果公式已经计算好直接返回
-        e_value = read_calculated_date_from_row(target_row)
-        if e_value and e_value.strip():
-            if is_date_string(e_value):
-                calculated_date = e_value
-            elif e_value not in ["", "计算中...", "#REF!", "#N/A", "#VALUE!"]:
-                calculated_date = e_value
+        # 确定目标行（用于后续订单提交）
+        target_row = _get_or_allocate_row(pending_row_index, submitter_id, now)
 
-        if not calculated_date:
-            wait_interval = 0.3  # 每0.3秒检查一次
-            elapsed = 0
-            while elapsed < max_wait and not calculated_date:
-                time.sleep(wait_interval)
-                elapsed += wait_interval
-                e_value = read_calculated_date_from_row(target_row)
-                if e_value and e_value.strip():
-                    if is_date_string(e_value):
-                        calculated_date = e_value
-                        break
-                    elif e_value not in ["", "计算中...", "#REF!", "#N/A", "#VALUE!"]:
-                        calculated_date = e_value
-                        break
-
-        # 5. 记录临时行信息
-        with _temp_row_lock:
-            _temp_row_tracker[temp_key] = {
-                "row_index": target_row,
-                "timestamp": now,
-                "submitter_id": submitter_id
-            }
-
-        # 5. 更新缓存（仅在非强制刷新时）
+        # 更新结果缓存
         if not force_refresh:
-            cache_key = f"{model}:{tonnage}:{expected_date}"
             _calc_result_cache["key"] = cache_key
             _calc_result_cache["result"] = calculated_date
             _calc_result_cache["timestamp"] = now
@@ -923,10 +866,38 @@ def calculate_date():
             "success": True,
             "calculated_date": calculated_date,
             "row_index": target_row,
-            "message": "" if calculated_date else "公式计算超时，请重试"
+            "message": message
         })
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
+
+
+def _get_or_allocate_row(pending_row_index, submitter_id, now):
+    """获取或分配目标行号，复用旧的临时行分配逻辑"""
+    target_row = 0
+    temp_key = f"{submitter_id}"
+
+    if pending_row_index > 0:
+        target_row = pending_row_index
+    else:
+        with _temp_row_lock:
+            if temp_key in _temp_row_tracker:
+                tracked = _temp_row_tracker[temp_key]
+                if now - tracked["timestamp"] < _TEMP_ROW_TIMEOUT:
+                    target_row = tracked["row_index"]
+
+    if target_row == 0:
+        target_row = get_next_empty_row(SHEET_ID, start_from=2)
+        ensure_sheet_rows(target_row + 10)
+
+    with _temp_row_lock:
+        _temp_row_tracker[temp_key] = {
+            "row_index": target_row,
+            "timestamp": now,
+            "submitter_id": submitter_id
+        }
+
+    return target_row
 
 
 def _cleanup_expired_temp_rows():
