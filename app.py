@@ -864,22 +864,48 @@ def calculate_date():
         # 3. 等待公式计算完成（腾讯表格公式计算有延迟，轮询读取E列）
         calculated_date = ""
         max_wait = 15  # 最多等待15秒
-        wait_interval = 0.5  # 每0.5秒检查一次
-        elapsed = 0
 
-        while elapsed < max_wait:
-            time.sleep(wait_interval)
-            elapsed += wait_interval
-            e_value = read_calculated_date_from_row(target_row)
-            if e_value and e_value.strip():
-                # 检查是否是有效日期格式
-                if is_date_string(e_value):
-                    calculated_date = e_value
-                    break
-                # 如果不是日期格式但非空，可能是公式还在计算中，继续等待
-                elif e_value not in ["", "计算中..."]:
-                    calculated_date = e_value
-                    break
+        # 优化：先立即检查一次，如果公式已经计算好直接返回
+        e_value = read_calculated_date_from_row(target_row)
+        if e_value and e_value.strip():
+            if is_date_string(e_value):
+                calculated_date = e_value
+            elif e_value not in ["", "计算中..."]:
+                calculated_date = e_value
+
+        if not calculated_date:
+            wait_interval = 0.3  # 每0.3秒检查一次
+            elapsed = 0
+            while elapsed < max_wait and not calculated_date:
+                time.sleep(wait_interval)
+                elapsed += wait_interval
+                e_value = read_calculated_date_from_row(target_row)
+                if e_value and e_value.strip():
+                    if is_date_string(e_value):
+                        calculated_date = e_value
+                        break
+                    elif e_value not in ["", "计算中..."]:
+                        calculated_date = e_value
+                        break
+
+        # 3.5 缓存查询：如果同一参数已有结果且未过期，直接返回
+        if not force_refresh:
+            cache_key = f"{model}:{tonnage}:{expected_date}"
+            import time as _time_module_calc
+            if (_calc_result_cache.get("key") == cache_key
+                and _calc_result_cache.get("result")
+                and _time_module_calc.time() - _calc_result_cache.get("timestamp", 0) < _CALC_CACHE_TTL):
+                # 清理临时行（之前写入但未使用的）
+                try:
+                    clear_temp_row(target_row)
+                except:
+                    pass
+                return jsonify({
+                    "success": True,
+                    "calculated_date": _calc_result_cache["result"],
+                    "row_index": 0,
+                    "message": ""
+                })
 
         # 4. 记录临时行信息
         with _temp_row_lock:
