@@ -732,7 +732,8 @@ def get_models():
 
 
 # 计算结果缓存：避免重复计算
-_calc_result_cache = {"key": None, "result": None, "timestamp": 0}
+_calc_result_cache = {"key": None, "result": None, "timestamp": 0}  # 计算结果缓存
+_CALC_CACHE_TTL = 300  # 计算结果缓存TTL（5分钟）
 _CALC_CACHE_TTL = 30  # 30秒缓存
 
 # 待处理行缓存
