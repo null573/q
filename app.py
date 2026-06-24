@@ -563,15 +563,16 @@ def read_calculated_date_from_row(row_index_1based):
 
 def _find_user_temp_row_in_sheet(submitter_id):
     """扫描腾讯表格，查找该用户的临时行（Render重启后内存缓存丢失时的兜底）
-    条件：A列有值（型号），F列为空（未提交排队），K列等于submitter_id
+    条件：A列有值（型号），F列为空（未提交排队）
+    优化：一次性读取A:F列，不逐行查询
     """
     try:
         batch_size = 50
-        for offset in range(0, 2000, batch_size):
+        for offset in range(0, 500, batch_size):  # 只扫描前500行（临时行通常在前面）
             start = offset + 1
             end = offset + batch_size
-            # 读取A/F/K列
-            range_str = f"A{start}:A{end}"
+            # 一次性读取A:F列
+            range_str = f"A{start}:F{end}"
             grid_data = read_sheet_range(SHEET_ID, range_str)
             rows = grid_data.get("rows", [])
             if not rows:
@@ -582,21 +583,16 @@ def _find_user_temp_row_in_sheet(submitter_id):
                 if actual_row < 3:
                     continue
                 values = rows[i].get("values", [])
-                if not values:
+                if not values or len(values) < 6:
                     continue
-                cv = values[0].get("cellValue")
-                if cv:
-                    a_val = parse_cell_value(cv)
+                # A列有值（型号）
+                a_cv = values[0].get("cellValue")
+                if a_cv:
+                    a_val = parse_cell_value(a_cv)
                     if a_val and a_val.strip():
-                        # A列有值，检查F列是否为空（未提交）
-                        f_range = f"F{actual_row}:F{actual_row}"
-                        f_grid = read_sheet_range(SHEET_ID, f_range)
-                        f_rows = f_grid.get("rows", [])
-                        f_val = ""
-                        if f_rows and f_rows[0].get("values"):
-                            f_cv = f_rows[0]["values"][0].get("cellValue")
-                            if f_cv:
-                                f_val = parse_cell_value(f_cv)
+                        # F列为空（未提交排队）
+                        f_cv = values[5].get("cellValue")
+                        f_val = parse_cell_value(f_cv) if f_cv else ""
                         if not f_val.strip():
                             return actual_row
 
