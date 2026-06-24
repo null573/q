@@ -321,19 +321,9 @@ def parse_cell_value(cell_value):
         return str(cell_value["number"])
     if "time" in cell_value:
         t = cell_value["time"]
-        # 处理时区：腾讯API返回的是UTC时间戳，需要转换为北京时间
-        import datetime
-        try:
-            # 尝试从time对象构建UTC日期，然后转为北京时间
-            utc_dt = datetime.datetime(t['year'], t['month'], t['day'], 
-                                      t.get('hour', 0), t.get('minute', 0), t.get('second', 0),
-                                      tzinfo=datetime.timezone.utc)
-            # 转为北京时间 (UTC+8)
-            beijing_dt = utc_dt.astimezone(datetime.timezone(datetime.timedelta(hours=8)))
-            result = beijing_dt.strftime("%Y-%m-%d")
-        except Exception:
-            # 如果转换失败，直接使用原始值
-            result = f"{t['year']}-{t['month']:02d}-{t['day']:02d}"
+        # 腾讯API返回的time对象中的year/month/day已经是本地时间（北京时间）
+        # 直接使用，不需要时区转换
+        result = f"{t['year']}-{t['month']:02d}-{t['day']:02d}"
         # 过滤Excel空日期默认值
         if result == "1899-12-30":
             return ""
@@ -2142,5 +2132,6 @@ def save_model_config():
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
+
 
 
