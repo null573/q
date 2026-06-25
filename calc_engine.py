@@ -12,7 +12,8 @@ import time as time_module
 import threading
 
 BASE_URL = "https://docs.qq.com/openapi/spreadsheet/v3"
-FILE_ID = "DRmxUY0RBQVJXRXpC"
+FILE_ID = "DRnhDemRIS25mdnFF"        # 产能数据表（旧表格）
+CONFIG_FILE_ID = "DRmxUY0RBQVJXRXpC"  # 配置表（新表格）
 HTTP = requests.Session()
 adapter = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=20, max_retries=2)
 HTTP.mount('https://', adapter)
@@ -113,8 +114,9 @@ def parse_cell_value(cell_value):
     return ""
 
 
-def read_sheet_range(sheet_id, range_str):
-    url = f"{BASE_URL}/files/{FILE_ID}/{sheet_id}/{range_str}"
+def read_sheet_range(sheet_id, range_str, file_id=None):
+    fid = file_id if file_id else FILE_ID
+    url = f"{BASE_URL}/files/{fid}/{sheet_id}/{range_str}"
     resp = HTTP.get(url, headers=get_headers(), timeout=30)
     if resp.status_code == 200:
         data = resp.json()
@@ -352,7 +354,7 @@ def _load_model_configs_from_sheet():
         return _model_config_cache
 
     config_sheet_id = "dc53jt"
-    grid_data = read_sheet_range(config_sheet_id, "A2:F200")
+    grid_data = read_sheet_range(config_sheet_id, "A2:F200", file_id=CONFIG_FILE_ID)
     rows = grid_data.get("rows", [])
 
     configs = {}
