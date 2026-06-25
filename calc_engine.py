@@ -452,6 +452,7 @@ def calculate_delivery_date(model, tonnage_str, expected_date_str, occupied_capa
 
 
 def clear_cache():
+    global _model_config_cache_time
     _memory_cache.clear()
     _preload_cache.clear()
     _limit_date_cache.clear()
