@@ -533,9 +533,6 @@ def _preload_all_models():
 
 def _preload_worker():
     """后台预抓取工作线程"""
-    # 启动时等待5秒，让服务完全初始化
-    time_module.sleep(5)
-
     while not _preload_stop_event.is_set():
         try:
             _preload_all_models()
