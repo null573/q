@@ -246,10 +246,6 @@ def get_headers():
     }
 
 
-# 模块启动时清除所有旧缓存，确保部署后使用最新配置
-from calc_engine import clear_cache as _clear_calc_cache
-_clear_calc_cache()
-
 # 预加载线程将在第一个请求时通过 before_request 启动，避免 worker 导入时阻塞
 
 
