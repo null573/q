@@ -9,7 +9,7 @@ import functools
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from calc_engine import MODEL_CONFIG, calculate_delivery_date, set_token_getter, start_preload_thread, clear_cache
+from calc_engine import MODEL_CONFIG, calculate_delivery_date, set_token_getter, start_preload_thread
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
@@ -902,10 +902,7 @@ def calculate_date():
         expected_date = data.get('expected_date', '')
         pending_row_index = data.get('pending_row_index', 0)
         submitter_id = data.get('submitter_id', '')
-        force_refresh = data.get('force_refresh', False)
-
-        if force_refresh:
-            clear_cache()
+        
 
         import time
         now = time.time()
