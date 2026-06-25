@@ -1,6 +1,6 @@
 """
-可发货日期计算引擎
-根据型号、吨位、期望发货日期，从各工作表中计算可发货日期
+可发货日期计算引擎 - 优化版
+优化点：后台定时预抓取腾讯表格数据到内存缓存，计算时直接读内存
 """
 
 from datetime import datetime, timedelta, date
@@ -9,28 +9,25 @@ import os
 import re
 import requests
 import time as time_module
+import threading
 
 BASE_URL = "https://docs.qq.com/openapi/spreadsheet/v3"
-FILE_ID = "DRnhDemRIS25mdnFF"
+FILE_ID = "DRmxUY0RBQVJXRXpC"
 HTTP = requests.Session()
 adapter = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=20, max_retries=2)
 HTTP.mount('https://', adapter)
 HTTP.mount('http://', adapter)
 
-# 外部注入的token获取函数（由app.py设置，确保与管理员缓存同步）
+# 外部注入的token获取函数
 _token_getter = None
 
 
 def set_token_getter(fn):
-    """设置外部token获取函数，由app.py调用以同步管理员缓存的token"""
     global _token_getter
     _token_getter = fn
 
 
 def get_headers():
-    """获取腾讯表格API请求头
-    优先使用外部注入的token获取函数（与管理员缓存同步），
-    fallback到环境变量"""
     if _token_getter:
         token = _token_getter()
         if token:
@@ -51,19 +48,16 @@ def get_headers():
     }
 
 
-# ========== 预编译正则表达式（避免每次调用重复编译） ==========
+# ========== 预编译正则表达式 ==========
 _DATE_RE_YYYY_MM_DD = re.compile(r'^(\d{4})年(\d{1,2})月(\d{1,2})日$')
 _DATE_RE_MM_DD = re.compile(r'^(\d{1,2})月(\d{1,2})日$')
 _DATE_RE_M_DOT_D = re.compile(r'^(\d{1,2})\.(\d{1,2})$')
-_LIMIT_CELL_RE = re.compile(r'^([A-Z]+)(\d+)$')
 
-
-# ========== 列字母→索引缓存（固定映射，避免重复计算） ==========
+# ========== 列字母→索引缓存 ==========
 _COL_INDEX_CACHE = {}
 
 
 def col_letter_to_index(col):
-    """将列字母转为0-based索引，带缓存"""
     if col in _COL_INDEX_CACHE:
         return _COL_INDEX_CACHE[col]
     result = 0
@@ -74,7 +68,7 @@ def col_letter_to_index(col):
     return result
 
 
-# 型号 -> (工作表sheetId, 日期列起始行, 产能列字母, 上限日期单元格, 数据行数)
+# 型号配置
 MODEL_CONFIG = {
     "F5631":  ("000005", 6, "J", "M1", 179),
     "F3500":  ("000005", 6, "K", "N1", 179),
@@ -107,7 +101,6 @@ MODEL_CONFIG = {
 
 
 def parse_cell_value(cell_value):
-    """解析单元格值"""
     if not cell_value:
         return ""
     if "text" in cell_value:
@@ -121,7 +114,6 @@ def parse_cell_value(cell_value):
 
 
 def read_sheet_range(sheet_id, range_str):
-    """读取表格范围数据"""
     url = f"{BASE_URL}/files/{FILE_ID}/{sheet_id}/{range_str}"
     resp = HTTP.get(url, headers=get_headers(), timeout=30)
     if resp.status_code == 200:
@@ -132,7 +124,6 @@ def read_sheet_range(sheet_id, range_str):
 
 
 def read_single_cell(sheet_id, cell):
-    """读取单个单元格（腾讯API读取单个单元格可能返回空，读取范围更稳定）"""
     grid_data = read_sheet_range(sheet_id, f"{cell}:{cell}")
     rows = grid_data.get("rows", [])
     if rows:
@@ -143,19 +134,14 @@ def read_single_cell(sheet_id, cell):
     return ""
 
 
-# 预编译日期解析格式，避免每次调用重复创建
 _DATE_FMT1 = "%Y-%m-%d"
 _DATE_FMT2 = "%Y/%m/%d"
 
 
 def parse_date(date_str):
-    """解析日期字符串为date对象
-    支持格式: YYYY-MM-DD, YYYY/MM/DD, YYYY年MM月DD日, MM月DD日(默认当年), M.D"""
     s = str(date_str).strip()
     if not s:
         return None
-
-    # 1. 标准格式 YYYY-MM-DD / YYYY/MM/DD
     try:
         return datetime.strptime(s, _DATE_FMT1).date()
     except ValueError:
@@ -164,67 +150,93 @@ def parse_date(date_str):
         return datetime.strptime(s, _DATE_FMT2).date()
     except ValueError:
         pass
-
-    # 2. 中文格式: YYYY年MM月DD日
     m = _DATE_RE_YYYY_MM_DD.match(s)
     if m:
         try:
             return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
         except ValueError:
             pass
-
-    # 3. 中文格式: MM月DD日 (默认当年)
     m = _DATE_RE_MM_DD.match(s)
     if m:
         try:
             return date(date.today().year, int(m.group(1)), int(m.group(2)))
         except ValueError:
             pass
-
-    # 4. 纯数字: M.D (如 6.30)
     m = _DATE_RE_M_DOT_D.match(s)
     if m:
         try:
             return date(date.today().year, int(m.group(1)), int(m.group(2)))
         except ValueError:
             pass
-
     return None
 
 
 def parse_number(val):
-    """解析数字"""
     try:
         return float(str(val).strip())
     except:
         return None
 
 
-# ========== 缓存：工作表数据 ==========
-cache = {}
-CACHE_TTL = 300  # 300秒缓存（产能数据变化不频繁，延长缓存时间）
+# ========== 内存缓存系统（核心优化） ==========
+# 结构: {cache_key: {"data": {...}, "ts": timestamp}}
+_memory_cache = {}
+_memory_cache_lock = threading.RLock()
 
-# A列日期数据缓存（按sheet_id+start_row分组，同sheet多个型号共享）
-_date_col_cache = {}
-_DATE_COL_CACHE_TTL = 300
+# 后台预抓取的数据缓存
+_preload_cache = {}
+_preload_cache_lock = threading.RLock()
+
+# 缓存TTL配置
+CACHE_TTL = 300  # 5分钟（按需缓存）
+PRELOAD_INTERVAL = 60  # 后台每60秒预抓取一次
+
+
+def _get_from_memory(cache_key):
+    """从内存缓存读取，带锁"""
+    with _memory_cache_lock:
+        if cache_key in _memory_cache:
+            entry = _memory_cache[cache_key]
+            if time_module.time() - entry["ts"] < CACHE_TTL:
+                return entry["data"]
+    return None
+
+
+def _set_memory_cache(cache_key, data):
+    """写入内存缓存，带锁"""
+    with _memory_cache_lock:
+        _memory_cache[cache_key] = {"data": data, "ts": time_module.time()}
+
+
+def _get_preloaded_data(cache_key):
+    """获取后台预抓取的数据"""
+    with _preload_cache_lock:
+        if cache_key in _preload_cache:
+            entry = _preload_cache[cache_key]
+            # 预加载数据有效期更长（2倍间隔）
+            if time_module.time() - entry["ts"] < PRELOAD_INTERVAL * 2:
+                return entry["data"]
+    return None
+
+
+def _set_preload_cache(cache_key, data):
+    """写入后台预抓取缓存"""
+    with _preload_cache_lock:
+        _preload_cache[cache_key] = {"data": data, "ts": time_module.time()}
 
 
 def _read_date_column(sheet_id, start_row, row_count):
-    """读取A列日期数据，带独立缓存（同sheet多个型号共享）"""
+    """读取A列日期数据"""
     cache_key = f"{sheet_id}:{start_row}"
-    now = time_module.time()
-
-    if cache_key in _date_col_cache:
-        data, ts = _date_col_cache[cache_key]
-        if now - ts < _DATE_COL_CACHE_TTL:
-            return data
+    cached = _get_from_memory(cache_key)
+    if cached is not None:
+        return cached
 
     end_row = start_row + row_count - 1
     range_str = f"A{start_row}:A{end_row}"
     grid_data = read_sheet_range(sheet_id, range_str)
     rows = grid_data.get("rows", [])
 
-    # 解析日期列表（保持行顺序）
     dates = []
     for row in rows:
         values = row.get("values", [])
@@ -238,73 +250,49 @@ def _read_date_column(sheet_id, start_row, row_count):
         else:
             dates.append(None)
 
-    _date_col_cache[cache_key] = (dates, now)
+    _set_memory_cache(cache_key, dates)
     return dates
 
 
 def get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count):
-    """获取工作表数据，带缓存。
-    优化：一次读取A列到产能列的范围（避免API截断末尾空行），提取日期和产能"""
+    """获取工作表数据 - 优先从预加载缓存读取"""
     cache_key = f"{sheet_id}:{start_row}:{capacity_col}:{limit_cell}"
 
-    now = time_module.time()
-    # 检查缓存
-    if cache_key in cache:
-        cached_data, cached_time = cache[cache_key]
-        if now - cached_time < CACHE_TTL:
-            return cached_data
+    # 1. 先检查后台预加载缓存（最快）
+    preloaded = _get_preloaded_data(cache_key)
+    if preloaded is not None:
+        return preloaded
 
+    # 2. 再检查按需缓存
+    cached = _get_from_memory(cache_key)
+    if cached is not None:
+        return cached
+
+    # 3. 从腾讯API读取（最慢，但必要时）
     capacity_col_index = col_letter_to_index(capacity_col)
-
-    # 一次读取A列到产能列的范围（多列读取不会截断末尾空行）
     end_row = start_row + row_count - 1
     range_str = f"A{start_row}:{capacity_col}{end_row}"
     grid_data = read_sheet_range(sheet_id, range_str)
     rows = grid_data.get("rows", [])
 
-    # DEBUG: 记录读取详情
-    debug_info = {
-        "range": range_str,
-        "requested_rows": row_count,
-        "returned_rows": len(rows),
-        "capacity_col_index": capacity_col_index,
-        "first_few_dates": [],
-        "last_few_dates": [],
-        "skipped_rows": 0
-    }
-
-    # 提取日期（A列）和产能列
-    # 同时更新A列缓存（同sheet多个型号共享）
-    date_col_cache_key = f"{sheet_id}:{start_row}"
-    dates_cached = []
-
     date_capacity_map = {}
+    dates_cached = []
 
     for i, row in enumerate(rows):
         values = row.get("values", [])
         if len(values) < capacity_col_index + 1:
             dates_cached.append(None)
-            debug_info["skipped_rows"] += 1
-            if i < 5:
-                debug_info["first_few_dates"].append(f"row{i}:values_len={len(values)}")
             continue
 
-        # A列日期
         cv = values[0].get("cellValue")
         if cv:
             date_val = parse_cell_value(cv)
             d = parse_date(date_val)
             dates_cached.append(d)
-            if i < 5:
-                debug_info["first_few_dates"].append(f"row{i}:{date_val}->{d}")
-            if i >= len(rows) - 5:
-                debug_info["last_few_dates"].append(f"row{i}:{date_val}->{d}")
         else:
             dates_cached.append(None)
-            debug_info["skipped_rows"] += 1
             continue
 
-        # 产能列
         cv = values[capacity_col_index].get("cellValue")
         if not cv:
             continue
@@ -313,13 +301,11 @@ def get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count):
         if cap_val is not None:
             date_capacity_map[d] = cap_val
 
-    # DEBUG: 打印调试信息
-    print(f"[DEBUG get_sheet_data] sheet={sheet_id} model={cache_key} {debug_info}", flush=True)
-
     # 更新A列缓存
-    _date_col_cache[date_col_cache_key] = (dates_cached, now)
+    date_col_cache_key = f"{sheet_id}:{start_row}"
+    _set_memory_cache(date_col_cache_key, dates_cached)
 
-    # 读取上限日期（带独立缓存，避免重复API调用）
+    # 读取上限日期
     limit_date = _read_limit_date(sheet_id, limit_cell)
 
     result = {
@@ -327,7 +313,7 @@ def get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count):
         "limit_date": limit_date
     }
 
-    cache[cache_key] = (result, now)
+    _set_memory_cache(cache_key, result)
     return result
 
 
@@ -337,7 +323,6 @@ _LIMIT_DATE_CACHE_TTL = 300
 
 
 def _read_limit_date(sheet_id, limit_cell):
-    """读取上限日期，带独立缓存"""
     cache_key = f"{sheet_id}:{limit_cell}"
     now = time_module.time()
 
@@ -353,14 +338,13 @@ def _read_limit_date(sheet_id, limit_cell):
     return limit_date
 
 
-# 配置表缓存：从腾讯表格配置表读取的型号配置
+# 配置表缓存
 _model_config_cache = {}
 _model_config_cache_time = 0
-MODEL_CONFIG_CACHE_TTL = 300  # 300秒缓存
+MODEL_CONFIG_CACHE_TTL = 300
 
 
 def _load_model_configs_from_sheet():
-    """从腾讯表格配置表读取型号配置（带300秒缓存）"""
     global _model_config_cache, _model_config_cache_time
 
     now = time_module.time()
@@ -402,7 +386,6 @@ def _load_model_configs_from_sheet():
 
 
 def _get_model_config(model):
-    """获取型号配置：先查硬编码，再查腾讯表格配置表"""
     if model in MODEL_CONFIG:
         return MODEL_CONFIG[model]
     sheet_configs = _load_model_configs_from_sheet()
@@ -412,37 +395,20 @@ def _get_model_config(model):
 
 
 def calculate_delivery_date(model, tonnage_str, expected_date_str, occupied_capacity=None):
-    """
-    计算可发货日期
-
-    参数:
-        model: 型号
-        tonnage_str: 吨位（字符串）
-        expected_date_str: 期望发货日期（字符串 YYYY-MM-DD）
-        occupied_capacity: 已占用产能字典（保留参数，库存余额型列不需要）
-
-    返回:
-        (calculated_date_str, message)
-    """
-    # 1. 检查型号是否在配置中
     config = _get_model_config(model)
     if not config:
         return "请联系商务支持", f"型号 {model} 暂无排产数据"
 
-    # 2. 解析吨位
     tonnage = parse_number(tonnage_str)
     if tonnage is None or tonnage <= 0:
         return "", "吨位不能为空"
 
-    # 3. 解析期望日期
     expected_date = parse_date(expected_date_str)
     if expected_date is None:
         return "", "期望发货日期不能为空"
 
-    # 4. 获取工作表配置
     sheet_id, start_row, capacity_col, limit_cell, row_count = config
 
-    # 5. 读取工作表数据（带缓存）
     sheet_data = get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count)
     date_capacity_map = sheet_data["date_capacity_map"]
     limit_date = sheet_data["limit_date"]
@@ -450,15 +416,10 @@ def calculate_delivery_date(model, tonnage_str, expected_date_str, occupied_capa
     if not date_capacity_map:
         return "请联系商务支持", "工作表数据为空"
 
-    # 如果上限日期未设置，自动使用产能表中的最大日期
     if limit_date is None:
         limit_date = max(date_capacity_map.keys())
         if not limit_date:
             return "请联系商务支持", "上限日期未设置"
-
-    # 6. 公式逻辑（产能列为库存余额，直接使用原始值）：
-    #    从期望日期开始往后找，如果所有日期的库存余额 >= 吨位，返回期望日期
-    #    否则找到库存余额 < 吨位的最大日期，+1天
 
     filtered_caps = []
     low_cap_dates = []
@@ -473,7 +434,6 @@ def calculate_delivery_date(model, tonnage_str, expected_date_str, occupied_capa
         max_data_date = max(date_capacity_map.keys())
         return "请联系商务支持", f"排产数据只到{max_data_date.strftime('%m月%d日')}，期望日期{expected_date_str}超出范围"
 
-    # 检查库存余额最小值是否 >= 吨位
     if min(filtered_caps) >= tonnage:
         return expected_date_str, ""
 
@@ -490,5 +450,116 @@ def calculate_delivery_date(model, tonnage_str, expected_date_str, occupied_capa
 
 
 def clear_cache():
-    """清除缓存"""
     cache.clear()
+    _memory_cache.clear()
+    _preload_cache.clear()
+
+
+# ========== 后台预抓取线程 ==========
+_preload_thread = None
+_preload_stop_event = threading.Event()
+
+
+def _preload_all_models():
+    """预抓取所有型号的产能数据到内存"""
+    print(f"[preload] 开始预抓取 {len(MODEL_CONFIG)} 个型号...", flush=True)
+    success = 0
+
+    for model, config in MODEL_CONFIG.items():
+        try:
+            sheet_id, start_row, capacity_col, limit_cell, row_count = config
+            cache_key = f"{sheet_id}:{start_row}:{capacity_col}:{limit_cell}"
+
+            # 检查是否已有较新的预加载数据
+            existing = _get_preloaded_data(cache_key)
+            if existing is not None:
+                continue  # 跳过，已有有效缓存
+
+            capacity_col_index = col_letter_to_index(capacity_col)
+            end_row = start_row + row_count - 1
+            range_str = f"A{start_row}:{capacity_col}{end_row}"
+            grid_data = read_sheet_range(sheet_id, range_str)
+            rows = grid_data.get("rows", [])
+
+            date_capacity_map = {}
+            dates_cached = []
+
+            for row in rows:
+                values = row.get("values", [])
+                if len(values) < capacity_col_index + 1:
+                    dates_cached.append(None)
+                    continue
+
+                cv = values[0].get("cellValue")
+                if cv:
+                    date_val = parse_cell_value(cv)
+                    d = parse_date(date_val)
+                    dates_cached.append(d)
+                else:
+                    dates_cached.append(None)
+                    continue
+
+                cv = values[capacity_col_index].get("cellValue")
+                if not cv:
+                    continue
+                cap_str = parse_cell_value(cv)
+                cap_val = parse_number(cap_str)
+                if cap_val is not None:
+                    date_capacity_map[d] = cap_val
+
+            # 读取上限日期
+            limit_date = _read_limit_date(sheet_id, limit_cell)
+
+            result = {
+                "date_capacity_map": date_capacity_map,
+                "limit_date": limit_date
+            }
+
+            # 写入预加载缓存
+            _set_preload_cache(cache_key, result)
+
+            # 同时更新A列缓存
+            date_col_cache_key = f"{sheet_id}:{start_row}"
+            _set_memory_cache(date_col_cache_key, dates_cached)
+
+            success += 1
+        except Exception as e:
+            print(f"[preload] {model} 预抓取失败: {e}", flush=True)
+
+    print(f"[preload] 预抓取完成: {success}/{len(MODEL_CONFIG)} 个型号", flush=True)
+
+
+def _preload_worker():
+    """后台预抓取工作线程"""
+    # 启动时等待5秒，让服务完全初始化
+    time_module.sleep(5)
+
+    while not _preload_stop_event.is_set():
+        try:
+            _preload_all_models()
+        except Exception as e:
+            print(f"[preload] 预抓取异常: {e}", flush=True)
+
+        # 等待下一次预抓取
+        _preload_stop_event.wait(PRELOAD_INTERVAL)
+
+
+def start_preload_thread():
+    """启动后台预抓取线程"""
+    global _preload_thread
+    if _preload_thread is not None and _preload_thread.is_alive():
+        return  # 已启动
+
+    _preload_stop_event.clear()
+    _preload_thread = threading.Thread(target=_preload_worker, daemon=True)
+    _preload_thread.start()
+    print("[preload] 后台预抓取线程已启动", flush=True)
+
+
+def stop_preload_thread():
+    """停止后台预抓取线程"""
+    global _preload_thread
+    if _preload_thread is not None:
+        _preload_stop_event.set()
+        _preload_thread.join(timeout=5)
+        _preload_thread = None
