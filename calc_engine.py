@@ -12,8 +12,8 @@ import time as time_module
 import threading
 
 BASE_URL = "https://docs.qq.com/openapi/spreadsheet/v3"
-FILE_ID = "DRmxUY0RBQVJXRXpC"        # 产能数据表（新表格）
-CONFIG_FILE_ID = "DRmxUY0RBQVJXRXpC"  # 配置表（新表格）
+FILE_ID = "DRnhDemRIS25mdnFF"        # 产能数据表（新表格）
+CONFIG_FILE_ID = "DRnhDemRIS25mdnFF"  # 配置表（新表格）
 HTTP = requests.Session()
 adapter = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=20, max_retries=2)
 HTTP.mount('https://', adapter)
