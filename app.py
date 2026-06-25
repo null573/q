@@ -19,11 +19,12 @@ CORS(app)
 set_token_getter(lambda: get_admin_secret("TENCENT_ACCESS_TOKEN") or ACCESS_TOKEN)
 
 # 腾讯表格配置（正式排队表格）
-FILE_ID = "DRmxUY0RBQVJXRXpC"
-SHEET_ID = "000007"       # 自助排队表格
-MODEL_SHEET_ID = "fkayvi"  # 牌号表格
+FILE_ID = "DRnhDemRIS25mdnFF"        # 订单表 + 产能数据表（旧表格）
+SHEET_ID = "000007"                  # 自助排队表格
+MODEL_FILE_ID = "DRmxUY0RBQVJXRXpC"  # 牌号表格所在文件（新表格）
+MODEL_SHEET_ID = "fkayvi"            # 牌号表格
 
-# 用户表配置（和正式表格同一个文件）
+# 用户表配置（新表格）
 USER_FILE_ID = "DRmxUY0RBQVJXRXpC"
 USER_SHEET_ID = "s9osf8"
 
@@ -394,9 +395,10 @@ def build_cell_value(value, is_date=False, is_number=False, font_size=14):
     return cell
 
 
-def read_sheet_range(sheet_id, range_str):
+def read_sheet_range(sheet_id, range_str, file_id=None):
     """读取表格范围数据，返回gridData"""
-    url = f"{BASE_URL}/files/{FILE_ID}/{sheet_id}/{range_str}"
+    fid = file_id if file_id else FILE_ID
+    url = f"{BASE_URL}/files/{fid}/{sheet_id}/{range_str}"
     resp = HTTP.get(url, headers=get_headers(), timeout=30)
     if resp.status_code == 200:
         data = resp.json()
@@ -769,7 +771,7 @@ def get_models():
         if _models_cache["data"] is not None and (now - _models_cache["timestamp"]) < MODEL_CACHE_TTL:
             return jsonify({"success": True, "models": _models_cache["data"]})
 
-        grid_data = read_sheet_range(MODEL_SHEET_ID, "A1:A100")
+        grid_data = read_sheet_range(MODEL_SHEET_ID, "A1:A100", file_id=MODEL_FILE_ID)
         rows = grid_data.get("rows", [])
         models = []
         for row in rows:
