@@ -906,6 +906,9 @@ def calculate_date():
 
         if force_refresh:
             clear_cache()
+            _empty_row_cache = {'row': 0, 'timestamp': 0}
+            _sheet_row_count_cache.clear()
+            _orders_cache = {'data': None, 'timestamp': 0}
 
         import time
         now = time.time()
