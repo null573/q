@@ -191,7 +191,7 @@ _preload_cache_lock = threading.RLock()
 
 # 缓存TTL配置
 CACHE_TTL = 300  # 5分钟（按需缓存）
-PRELOAD_INTERVAL = 60  # 后台每60秒预抓取一次
+PRELOAD_INTERVAL = 300  # 后台每300秒（5分钟）预抓取一次
 
 
 def _get_from_memory(cache_key):
@@ -532,15 +532,17 @@ def _preload_all_models():
 
 
 def _preload_worker():
-    """后台预抓取工作线程"""
+    """后台预抓取工作线程，根据北京时间动态调整间隔"""
     while not _preload_stop_event.is_set():
         try:
             _preload_all_models()
         except Exception as e:
             print(f"[preload] 预抓取异常: {e}", flush=True)
 
-        # 等待下一次预抓取
-        _preload_stop_event.wait(PRELOAD_INTERVAL)
+        # 根据北京时间决定等待间隔：白天(7-22点)60秒，夜间400秒
+        hour = datetime.now().hour
+        wait_seconds = 60 if 7 <= hour < 22 else 400
+        _preload_stop_event.wait(wait_seconds)
 
 
 def start_preload_thread():
