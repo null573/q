@@ -246,10 +246,8 @@ def get_headers():
     }
 
 
-@app.before_request
-def ensure_preload_started():
-    """确保预加载线程已启动（gunicorn 生产环境不会执行 __main__）"""
-    start_preload_thread()
+# 启动后台预加载线程（gunicorn 每个 worker 导入时都会执行）
+start_preload_thread()
 
 
 def read_users():
