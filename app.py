@@ -896,13 +896,14 @@ def _get_pending_rows():
 def calculate_date():
     """计算可发货日期：直接本地计算，不再写入腾讯表格触发公式"""
     try:
-        data = request.json
-        model = data.get('model', '')
+        data = request.json or {}
+        model = (data.get('model') or '').strip()
         tonnage = data.get('tonnage', '')
-        expected_date = data.get('expected_date', '')
+        customer = data.get('customer', '')
+        expected_date = (data.get('expected_date') or '').strip()
         pending_row_index = data.get('pending_row_index', 0)
-        submitter_id = data.get('submitter_id', '')
-        
+        submitter_id = (data.get('submitter_id') or '').strip()
+        force_refresh = bool(data.get('force_refresh', False))
 
         import time
         now = time.time()
@@ -978,7 +979,10 @@ def calculate_date():
             "message": ""
         })
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
+        import traceback
+        traceback.print_exc()
+        print(f"[calculate_date] 异常: model={data.get('model','') if 'data' in dir() else '?'} tonnage={data.get('tonnage','') if 'data' in dir() else '?'} err={e}", flush=True)
+        return jsonify({"success": False, "error": f"计算异常: {str(e)}"})
 
 
 def _cleanup_expired_temp_rows():

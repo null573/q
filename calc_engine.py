@@ -117,11 +117,23 @@ def parse_cell_value(cell_value):
 def read_sheet_range(sheet_id, range_str, file_id=None):
     fid = file_id if file_id else FILE_ID
     url = f"{BASE_URL}/files/{fid}/{sheet_id}/{range_str}"
-    resp = HTTP.get(url, headers=get_headers(), timeout=30)
-    if resp.status_code == 200:
-        data = resp.json()
-        return data.get("gridData", {})
-    print(f"[WARN] read_sheet_range failed: {resp.status_code} {range_str} {resp.text[:200]}", flush=True)
+    try:
+        resp = HTTP.get(url, headers=get_headers(), timeout=30)
+        if resp.status_code == 200:
+            data = resp.json()
+            # 检查腾讯API返回的业务错误码
+            if "code" in data and data.get("code") != 0:
+                err_msg = data.get("message", "unknown error")
+                print(f"[WARN] Tencent API error: {data.get('code')} {err_msg} for {range_str}", flush=True)
+                return {}
+            return data.get("gridData", {})
+        print(f"[WARN] read_sheet_range HTTP {resp.status_code}: {range_str} {resp.text[:200]}", flush=True)
+    except requests.exceptions.Timeout:
+        print(f"[WARN] read_sheet_range timeout: {range_str}", flush=True)
+    except requests.exceptions.RequestException as e:
+        print(f"[WARN] read_sheet_range request error: {e} for {range_str}", flush=True)
+    except Exception as e:
+        print(f"[WARN] read_sheet_range unexpected error: {e} for {range_str}", flush=True)
     return {}
 
 
@@ -402,15 +414,15 @@ def _get_model_config(model):
 def calculate_delivery_date(model, tonnage_str, expected_date_str, occupied_capacity=None):
     config = _get_model_config(model)
     if not config:
-        return "请联系商务支持", f"型号 {model} 暂无排产数据"
+        return "请联系商务支持", f"型号 {model} 暂无排产数据，请检查型号是否正确"
 
     tonnage = parse_number(tonnage_str)
     if tonnage is None or tonnage <= 0:
-        return "", "吨位不能为空"
+        return "", "吨位不能为空或无效"
 
     expected_date = parse_date(expected_date_str)
     if expected_date is None:
-        return "", "期望发货日期不能为空"
+        return "", f"期望发货日期格式无效: {expected_date_str}"
 
     sheet_id, start_row, capacity_col, limit_cell, row_count = config
 
@@ -419,12 +431,18 @@ def calculate_delivery_date(model, tonnage_str, expected_date_str, occupied_capa
     limit_date = sheet_data["limit_date"]
 
     if not date_capacity_map:
-        return "请联系商务支持", "工作表数据为空"
+        # 数据为空时清除缓存，下次重试从API读取
+        cache_key = f"{sheet_id}:{start_row}:{capacity_col}:{limit_cell}"
+        _memory_cache.pop(cache_key, None)
+        _preload_cache.pop(cache_key, None)
+        print(f"[calc] 型号{model}工作表数据为空 sheet={sheet_id} col={capacity_col}，可能是腾讯Token过期或网络问题", flush=True)
+        return "请联系商务支持", "排产数据读取失败，请稍后重试或联系管理员检查Token"
 
     if limit_date is None:
-        limit_date = max(date_capacity_map.keys())
-        if not limit_date:
-            return "请联系商务支持", "上限日期未设置"
+        if date_capacity_map:
+            limit_date = max(date_capacity_map.keys())
+        else:
+            return "请联系商务支持", "上限日期未设置且无排产数据"
 
     filtered_caps = []
     low_cap_dates = []
