@@ -452,11 +452,7 @@ def calculate_delivery_date(model, tonnage_str, expected_date_str, occupied_capa
 
 
 def clear_cache():
-    _memory_cache.clear()
-    _preload_cache.clear()
-
-
-# ========== 后台预抓取线程 ==========
+    _memory__preload_# ========== 后台预抓取线程 ==========
 _preload_thread = None
 _preload_stop_event = threading.Event()
 
