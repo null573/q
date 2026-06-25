@@ -2222,9 +2222,6 @@ def _warmup_capacity_cache():
     t.start()
 
 
-_warmup_keepalive()
-_warmup_capacity_cache()
-
 # ==================== 型号产能配置管理 API ====================
 
 MODEL_CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'model_configs.json')
@@ -2296,6 +2293,8 @@ def save_model_config():
         return jsonify({"success": False, "error": str(e)})
 
 if __name__ == '__main__':
+    _warmup_keepalive()
+    _warmup_capacity_cache()
     start_preload_thread()
     app.run(debug=True, host='0.0.0.0', port=5000)
 
