@@ -11,7 +11,7 @@
     <script>
         // 版本检查：如果服务器版本更新，自动刷新页面
         (function(){
-            var serverVersion = 46;
+            var serverVersion = 47;
             var localVersion = parseInt(localStorage.getItem('app_version') || '0');
             if (localVersion && localVersion < serverVersion) {
                 localStorage.setItem('app_version', serverVersion);
@@ -230,7 +230,7 @@
 
     <div id="toast" class="toast"></div>
 
-    <script src="{{ url_for('static', filename='js/app.v46.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app.v47.js') }}"></script>
 </body>
 </html>
 
