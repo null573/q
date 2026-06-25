@@ -422,8 +422,14 @@ def read_sheet_range(sheet_id, range_str, file_id=None):
 
 def get_next_empty_row(sheet_id, start_from=2):
     """获取表格下一个空行号（1-based），从A列第一个空行开始扫描（跳过表头第1行）
-    优化：增大批次到500行，减少API调用次数
+    优化：增大批次到500行，减少API调用次数；添加30秒缓存
     安全：start_from 参数允许调用方指定从哪行开始扫描，避免多人并发时依赖全局缓存"""
+    global _empty_row_cache
+    now = time.time()
+    # 缓存命中：30秒内直接返回缓存的空行位置
+    if _empty_row_cache["row"] >= start_from and (now - _empty_row_cache["timestamp"]) < EMPTY_ROW_CACHE_TTL:
+        return _empty_row_cache["row"]
+
     batch_size = 500
     for offset in range(start_from - 1, 2000, batch_size):
         start = offset + 1  # 1-based
@@ -446,8 +452,10 @@ def get_next_empty_row(sheet_id, start_from=2):
                         has_data = True
                         break
             if not has_data:
+                _empty_row_cache = {"row": actual_row, "timestamp": now}
                 return actual_row
 
+    _empty_row_cache = {"row": 2001, "timestamp": now}
     return 2001  # 如果前2000行都满了
 
 
@@ -1134,6 +1142,10 @@ _orders_cache = {"data": None, "timestamp": 0}
 # 全局缓存：过滤+排序后的结果（按用户和view_mode缓存）
 _filtered_cache = {"timestamp": 0}
 CACHE_TTL = 120  # 缓存120秒，减少API调用频率
+
+# 空行位置缓存（30秒）
+_empty_row_cache = {"row": 0, "timestamp": 0}
+EMPTY_ROW_CACHE_TTL = 30
 
 def clear_order_caches():
     """清空订单相关缓存，确保增删改后页面重新读取腾讯表最新数据
