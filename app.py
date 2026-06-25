@@ -246,6 +246,20 @@ def get_headers():
     }
 
 
+@app.before_request
+def ensure_preload_started():
+    """确保预加载线程已启动，若缓存为空则同步预热（gunicorn 生产环境不会执行 __main__）"""
+    start_preload_thread()
+    # 首次请求时若缓存为空，立即同步预热，避免用户等待后台线程
+    from calc_engine import _preload_cache
+    if not _preload_cache:
+        try:
+            from calc_engine import _preload_all_models
+            _preload_all_models()
+        except Exception as e:
+            print(f"[preload] 同步预热失败: {e}", flush=True)
+
+
 def read_users():
     """读取用户表，带短时缓存，返回用户权限信息"""
     now = time.time()
