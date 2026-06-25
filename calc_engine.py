@@ -263,7 +263,10 @@ def get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count):
     # 1. 先检查后台预加载缓存（最快）
     preloaded = _get_preloaded_data(cache_key)
     if preloaded is not None:
-        return preloaded
+        # 预加载数据可能因为部署后FILE_ID变更而包含空数据，需要验证
+        if preloaded.get("date_capacity_map"):
+            return preloaded
+        # 预加载缓存数据为空，跳过，走API实时读取
 
     # 2. 再检查按需缓存
     cached = _get_from_memory(cache_key)
