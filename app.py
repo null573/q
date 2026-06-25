@@ -408,10 +408,22 @@ def read_sheet_range(sheet_id, range_str, file_id=None):
     """读取表格范围数据，返回gridData"""
     fid = file_id if file_id else FILE_ID
     url = f"{BASE_URL}/files/{fid}/{sheet_id}/{range_str}"
-    resp = HTTP.get(url, headers=get_headers(), timeout=30)
-    if resp.status_code == 200:
-        data = resp.json()
-        return data.get("gridData", {})
+    try:
+        resp = HTTP.get(url, headers=get_headers(), timeout=30)
+        if resp.status_code == 200:
+            data = resp.json()
+            # 检查腾讯API返回的业务错误码
+            if "code" in data and data.get("code") != 0:
+                print(f"[WARN] Tencent API error in app.read_sheet_range: {data.get('code')} {data.get('message','')} for {range_str}", flush=True)
+                return {}
+            return data.get("gridData", {})
+        print(f"[WARN] app.read_sheet_range HTTP {resp.status_code}: {range_str} {resp.text[:200]}", flush=True)
+    except requests.exceptions.Timeout:
+        print(f"[WARN] app.read_sheet_range timeout: {range_str}", flush=True)
+    except requests.exceptions.RequestException as e:
+        print(f"[WARN] app.read_sheet_range request error: {e} for {range_str}", flush=True)
+    except Exception as e:
+        print(f"[WARN] app.read_sheet_range unexpected error: {e} for {range_str}", flush=True)
     return {}
 
 
@@ -457,8 +469,18 @@ def get_next_empty_row(sheet_id, start_from=2):
 def batch_update(requests_body):
     """执行批量更新操作"""
     url = f"{BASE_URL}/files/{FILE_ID}/batchUpdate"
-    resp = HTTP.post(url, headers=get_headers(), json=requests_body, timeout=30)
-    return resp
+    try:
+        resp = HTTP.post(url, headers=get_headers(), json=requests_body, timeout=30)
+        return resp
+    except Exception as e:
+        print(f"[WARN] batch_update exception: {e}", flush=True)
+        # 返回一个模拟的错误响应
+        class FakeResp:
+            status_code = 500
+            text = str(e)
+            def json(self):
+                return {"ret": -1, "error": str(e)}
+        return FakeResp()
 
 
 def ensure_sheet_rows(min_row_count):
@@ -470,56 +492,65 @@ def ensure_sheet_rows(min_row_count):
         return True
 
     # 慢速路径：加锁保护，确保只有一个线程执行扩容
-    with _sheet_row_count_lock:
-        # 双重检查：其他线程可能已经在等待期间完成了扩容
-        cached_count = _sheet_row_count_cache.get("count", 0)
-        if cached_count >= min_row_count:
-            return True
+    try:
+        with _sheet_row_count_lock:
+            # 双重检查：其他线程可能已经在等待期间完成了扩容
+            cached_count = _sheet_row_count_cache.get("count", 0)
+            if cached_count >= min_row_count:
+                return True
 
-        # 先获取当前表格信息
-        url = f"{BASE_URL}/files/{FILE_ID}"
-        resp = HTTP.get(url, headers=get_headers(), timeout=30)
-        if resp.status_code != 200:
-            return False
-        data = resp.json()
-        sheets = data.get("data", {}).get("sheets", [])
-        current_row_count = 0
-        for s in sheets:
-            if s.get("sheetID") == SHEET_ID:
-                current_row_count = s.get("rowCount", 0)
-                break
-        if current_row_count <= 0:
+            # 先获取当前表格信息
+            url = f"{BASE_URL}/files/{FILE_ID}"
+            resp = HTTP.get(url, headers=get_headers(), timeout=15)
+            if resp.status_code != 200:
+                print(f"[WARN] ensure_sheet_rows get file info failed: HTTP {resp.status_code}", flush=True)
+                return False
+            data = resp.json()
+            # 检查腾讯API业务错误
+            if "code" in data and data.get("code") != 0:
+                print(f"[WARN] ensure_sheet_rows Tencent API error: {data.get('code')} {data.get('message','')}", flush=True)
+                return False
+            sheets = data.get("data", {}).get("sheets", [])
+            current_row_count = 0
             for s in sheets:
                 if s.get("sheetID") == SHEET_ID:
-                    gp = s.get("gridProperties", {})
-                    current_row_count = gp.get("rowCount", 0)
+                    current_row_count = s.get("rowCount", 0)
                     break
+            if current_row_count <= 0:
+                for s in sheets:
+                    if s.get("sheetID") == SHEET_ID:
+                        gp = s.get("gridProperties", {})
+                        current_row_count = gp.get("rowCount", 0)
+                        break
 
-        _sheet_row_count_cache["count"] = current_row_count
+            _sheet_row_count_cache["count"] = current_row_count
 
-        if current_row_count >= min_row_count:
-            return True
-
-        # 需要添加行数（每次至少加500行，避免频繁调用）
-        rows_to_add = max(500, min_row_count - current_row_count)
-        body = {
-            "requests": [{
-                "insertDimension": {
-                    "range": {
-                        "sheetID": SHEET_ID,
-                        "dimension": "ROWS",
-                        "startIndex": current_row_count + 1,
-                        "endIndex": current_row_count + 1 + rows_to_add
-                    }
-                }
-            }]
-        }
-        resp = batch_update(body)
-        if resp.status_code == 200:
-            result = resp.json()
-            if result.get("ret") == 0 or "responses" in result:
-                _sheet_row_count_cache["count"] = current_row_count + rows_to_add
+            if current_row_count >= min_row_count:
                 return True
+
+            # 需要添加行数（每次至少加500行，避免频繁调用）
+            rows_to_add = max(500, min_row_count - current_row_count)
+            body = {
+                "requests": [{
+                    "insertDimension": {
+                        "range": {
+                            "sheetID": SHEET_ID,
+                            "dimension": "ROWS",
+                            "startIndex": current_row_count + 1,
+                            "endIndex": current_row_count + 1 + rows_to_add
+                        }
+                    }
+                }]
+            }
+            resp = batch_update(body)
+            if resp.status_code == 200:
+                result = resp.json()
+                if result.get("ret") == 0 or "responses" in result:
+                    _sheet_row_count_cache["count"] = current_row_count + rows_to_add
+                    return True
+            return False
+    except Exception as e:
+        print(f"[WARN] ensure_sheet_rows exception: {e}", flush=True)
         return False
 
 
@@ -909,7 +940,10 @@ def calculate_date():
         now = time.time()
 
         # 清理超时的临时行
-        _cleanup_expired_temp_rows()
+        try:
+            _cleanup_expired_temp_rows()
+        except Exception as e:
+            print(f"[calculate_date] _cleanup_expired_temp_rows 失败: {e}", flush=True)
 
         # 1. 确定目标行：始终复用同一行（只要没提交）
         target_row = 0
@@ -925,11 +959,19 @@ def calculate_date():
                         target_row = tracked["row_index"]
 
         if target_row == 0 and submitter_id:
-            target_row = _find_user_temp_row_in_sheet(submitter_id)
+            try:
+                target_row = _find_user_temp_row_in_sheet(submitter_id)
+            except Exception as e:
+                print(f"[calculate_date] _find_user_temp_row_in_sheet 失败: {e}", flush=True)
+                target_row = 0
 
         if target_row == 0:
-            target_row = get_next_empty_row(SHEET_ID, start_from=2)
-            ensure_sheet_rows(target_row + 10)
+            try:
+                target_row = get_next_empty_row(SHEET_ID, start_from=2)
+                ensure_sheet_rows(target_row + 10)
+            except Exception as e:
+                print(f"[calculate_date] get_next_empty_row/ensure_sheet_rows 失败: {e}", flush=True)
+                target_row = 3  # 使用默认行号，避免前端出错
 
         # 2. 缓存预查
         cache_key = f"{model}:{tonnage}:{expected_date}"
