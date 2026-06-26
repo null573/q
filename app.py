@@ -2229,6 +2229,64 @@ def test_connection():
         return jsonify({"success": False, "error": str(e)})
 
 
+@app.route('/api/diag-calc-engine', methods=['GET'])
+@require_auth
+def diag_calc_engine():
+    """诊断calc_engine的API调用耗时"""
+    import time
+    results = {}
+    
+    # Test 1: calc_engine's read_sheet_range
+    t0 = time.time()
+    from calc_engine import read_sheet_range
+    r1 = read_sheet_range("000006", "A4:AD10")
+    t1 = time.time()
+    results["calc_engine_read_sheet"] = {
+        "elapsed_ms": round((t1 - t0) * 1000, 2),
+        "has_rows": bool(r1.get("rows")),
+        "keys": list(r1.keys())[:5]
+    }
+    
+    # Test 2: app.py's read_sheet_range
+    t0 = time.time()
+    r2 = read_sheet_range_app("000006", "A4:AD10")
+    t1 = time.time()
+    results["app_read_sheet"] = {
+        "elapsed_ms": round((t1 - t0) * 1000, 2),
+        "has_rows": bool(r2.get("rows")),
+        "keys": list(r2.keys())[:5]
+    }
+    
+    # Test 3: calculate_delivery_date
+    t0 = time.time()
+    from calc_engine import calculate_delivery_date
+    date, err = calculate_delivery_date("C310", "7", "2026-06-27")
+    t1 = time.time()
+    results["calculate_delivery_date"] = {
+        "elapsed_ms": round((t1 - t0) * 1000, 2),
+        "date": date,
+        "error": err
+    }
+    
+    return jsonify({"success": True, "results": results})
+
+
+def read_sheet_range_app(sheet_id, range_str, file_id=None):
+    """app.py版本的read_sheet_range，用于诊断对比"""
+    fid = file_id if file_id else FILE_ID
+    url = f"{BASE_URL}/files/{fid}/{sheet_id}/{range_str}"
+    try:
+        resp = HTTP.get(url, headers=get_headers(), timeout=_HTTP_TIMEOUT)
+        if resp.status_code == 200:
+            data = resp.json()
+            if "code" in data and data.get("code") != 0:
+                return {}
+            return data.get("gridData", {})
+    except Exception as e:
+        return {"_error": str(e)}
+    return {}
+
+
 def _warmup_keepalive():
     """后台线程：启动时预热建立初始缓存 + 定期keepalive防止Render休眠"""
     import threading
