@@ -502,42 +502,19 @@ def calculate_delivery_date(model, tonnage_str, expected_date_str, occupied_capa
         else:
             return "请联系商务支持", "上限日期未设置且无排产数据"
 
-    filtered_caps = []
-    low_cap_dates = []
+    # 从期望日期开始，逐日向后查找第一个产能 >= 吨位的日期
+    candidate_date = expected_date
+    while candidate_date <= limit_date:
+        cap = date_capacity_map.get(candidate_date)
+        if cap is not None and cap > 0 and cap >= tonnage:
+            if candidate_date == expected_date:
+                return expected_date_str, ""
+            return candidate_date.strftime("%Y-%m-%d"), ""
+        candidate_date += timedelta(days=1)
 
-    for d, cap in date_capacity_map.items():
-        if expected_date <= d <= limit_date:
-            # 产能<=0视为公式未计算完成，不参与判断
-            if cap > 0:
-                filtered_caps.append(cap)
-                if cap < tonnage:
-                    low_cap_dates.append(d)
-
-    if not filtered_caps:
-        max_data_date = max(date_capacity_map.keys())
-        # 检查是否所有产能都<=0（公式未计算完成）
-        all_zero = all(cap <= 0 for cap in date_capacity_map.values() if cap is not None)
-        if all_zero and date_capacity_map:
-            return "请联系商务支持", "产能公式正在计算中，请稍后重试"
-        return "请联系商务支持", f"排产数据只到{max_data_date.strftime('%m月%d日')}，期望日期{expected_date_str}超出范围"
-
-    if min(filtered_caps) >= tonnage:
-        return expected_date_str, ""
-
-    if not low_cap_dates:
-        return "请联系商务支持", "无满足条件的排产日期"
-
-    max_low_date = max(low_cap_dates)
-    result_date = max_low_date + timedelta(days=1)
-
-    if result_date > limit_date:
-        cap_samples = dict(list(date_capacity_map.items())[:5])
-        print(f"[calc-DEBUG] model={model} tonnage={tonnage} expected={expected_date} limit={limit_date} "
-              f"max_low={max_low_date} result={result_date} filtered_count={len(filtered_caps)} "
-              f"low_count={len(low_cap_dates)} cap_samples={cap_samples}", flush=True)
-        return "请联系商务支持", f"上限日期{limit_date}早于结果日期{result_date}（产能不足日期到{max_low_date}）"
-
-    return result_date.strftime("%Y-%m-%d"), ""
+    # 范围内无足够产能
+    max_data_date = max(date_capacity_map.keys())
+    return "请联系商务支持", f"从{expected_date_str}到{limit_date.strftime('%Y-%m-%d')}均无足够产能，排产数据到{max_data_date.strftime('%m月%d日')}"
 
 
 def clear_cache():
