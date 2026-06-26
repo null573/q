@@ -35,15 +35,15 @@ OPEN_ID = os.environ.get('OPEN_ID', '9bc172e5338147d8a35c1438ea8d1577')
 
 BASE_URL = "https://docs.qq.com/openapi/spreadsheet/v3"
 HTTP = requests.Session()
-# 减少超时和重试，避免worker超时
+# 快速失败配置：无重试，短超时，非阻塞
 adapter = requests.adapters.HTTPAdapter(
-    pool_connections=10, pool_maxsize=20,
-    max_retries=1,
-    pool_block=True
+    pool_connections=5, pool_maxsize=10,
+    max_retries=0,
+    pool_block=False
 )
 HTTP.mount('https://', adapter)
 HTTP.mount('http://', adapter)
-_HTTP_TIMEOUT = 5  # 单个请求5秒超时，避免总请求时间超过Render限制
+_HTTP_TIMEOUT = 3  # 单个请求3秒超时，快速失败
 
 # 访问密码
 ACCESS_PASSWORD = os.environ.get('ACCESS_PASSWORD', 'queue2025')
@@ -1816,7 +1816,7 @@ def validate_tencent_token(token):
             "Client-Id": CLIENT_ID,
         }
         url = f"{BASE_URL}/files/{USER_FILE_ID}/{USER_SHEET_ID}/A1:A1"
-        resp = HTTP.get(url, headers=headers, timeout=20)
+        resp = HTTP.get(url, headers=headers, timeout=_HTTP_TIMEOUT)
         text = resp.text
         if resp.status_code != 200:
             return False, f"腾讯接口 {resp.status_code}: {text[:160]}"

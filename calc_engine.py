@@ -15,17 +15,17 @@ BASE_URL = "https://docs.qq.com/openapi/spreadsheet/v3"
 FILE_ID = "DRnhDemRIS25mdnFF"        # 产能数据表（新表格）
 CONFIG_FILE_ID = "DRnhDemRIS25mdnFF"  # 配置表（新表格）
 HTTP = requests.Session()
-# 减少超时和重试次数，避免gunicorn worker超时被杀
+# 快速失败配置：无重试，短超时，非阻塞
 adapter = requests.adapters.HTTPAdapter(
-    pool_connections=10, pool_maxsize=20,
-    max_retries=1,
-    pool_block=True
+    pool_connections=5, pool_maxsize=10,
+    max_retries=0,
+    pool_block=False
 )
 HTTP.mount('https://', adapter)
 HTTP.mount('http://', adapter)
 
 # 快速超时配置
-_HTTP_TIMEOUT = 5  # 单个请求超时5秒，避免总请求超时
+_HTTP_TIMEOUT = 3  # 单个请求3秒超时
 
 # 外部注入的token获取函数
 _token_getter = None
@@ -580,8 +580,8 @@ def _preload_all_models():
 
 def _preload_worker():
     """后台预抓取工作线程，根据北京时间动态调整间隔"""
-    # 首次启动时延迟5秒，避免与第一个用户请求竞争资源
-    _preload_stop_event.wait(5)
+    # 首次启动时延迟15秒，避免与第一个用户请求竞争资源
+    _preload_stop_event.wait(15)
     if _preload_stop_event.is_set():
         return
 
@@ -591,9 +591,10 @@ def _preload_worker():
         except Exception as e:
             print(f"[preload] 预抓取异常: {e}", flush=True)
 
-        # 根据北京时间决定等待间隔：白天(7-22点)60秒，夜间400秒
+        # 根据北京时间决定等待间隔：白天(7-22点)120秒，夜间600秒
+        # 增大间隔减少API调用频率，避免token问题时大量请求
         hour = datetime.now().hour
-        wait_seconds = 60 if 7 <= hour < 22 else 400
+        wait_seconds = 120 if 7 <= hour < 22 else 600
         _preload_stop_event.wait(wait_seconds)
 
 
