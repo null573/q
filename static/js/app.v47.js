@@ -447,7 +447,7 @@ function setupEventListeners() {
     ['click', 'keydown', 'scroll', 'touchstart'].forEach(evt => {
         document.addEventListener(evt, recordActivity, { passive: true });
     });
-    // 创建页面自动计算：型号/customer用change，吨位/期望日期用input实现即时触发
+    // 创建页面自动计算：型号/customer用change，吨位/期望日期用input+change实现即时触发
     const calcFieldsChange = ['model', 'customer'];
     calcFieldsChange.forEach(fieldId => {
         const field = document.getElementById(fieldId);
@@ -460,6 +460,8 @@ function setupEventListeners() {
         const field = document.getElementById(fieldId);
         if (field) {
             field.addEventListener('input', debounce(calculateDate, 300));
+            // 日期选择器在某些浏览器中只触发change不触发input，同时监听两者
+            field.addEventListener('change', debounce(calculateDate, 300));
         }
     });
     const calcModelInput = document.getElementById('modelInput');
@@ -572,12 +574,13 @@ async function calculateDate() {
                 if (oldHint2) oldHint2.remove();
             }
         } else {
-            document.getElementById('calculatedDate').value = '计算失败';
+            const errMsg = data.error || '计算失败';
+            document.getElementById('calculatedDate').value = errMsg;
             pendingRowIndex = 0;
             queueDateInput.disabled = true;
             queueDateInput.style.background = '#e9ecef';
             queueDateInput.style.cursor = 'not-allowed';
-            queueDateInput.placeholder = '计算失败，请重试';
+            queueDateInput.placeholder = errMsg;
         }
     } catch (error) {
         if (myVersion !== calcVersion) {
@@ -1245,7 +1248,7 @@ async function calculateDateForEdit() {
                 document.getElementById('editDateHint').textContent = '';
             }
         } else {
-            document.getElementById('editCalculatedDate').value = '计算失败';
+            document.getElementById('editCalculatedDate').value = data.error || '计算失败';
         }
     } catch (error) {
         document.getElementById('editCalculatedDate').value = '计算失败';
