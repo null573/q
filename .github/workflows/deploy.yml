@@ -11,7 +11,7 @@ jobs:
       - name: Trigger Render Deploy
         run: |
           curl -X POST "https://api.render.com/v1/services/srv-d8l6eet7vvec73evlu7g/deploys" \
-            -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
+            -H "Authorization: Bearer rnd_sPejtkY8asOJ7D5Wvdgztmn8fCWC" \
             -H "Accept: application/json" \
             -H "Content-Type: application/json" \
             -d '{"clearCache": "do_not_clear"}'
