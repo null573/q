@@ -168,6 +168,26 @@ def add_cache_headers(response):
     return response
 
 
+@app.errorhandler(Exception)
+def handle_exception(e):
+    """全局异常处理器，捕获所有未处理的异常，返回JSON而不是HTML"""
+    from werkzeug.exceptions import HTTPException
+    # 如果是HTTP异常（如404/405），让Flask默认处理
+    if isinstance(e, HTTPException):
+        return e.get_response(request.environ), e.code
+    import traceback
+    tb = traceback.format_exc()
+    print(f"[GLOBAL-ERROR] 未捕获异常: {e}\n{tb}", flush=True)
+    # 对于API请求返回JSON错误
+    if request.path.startswith('/api/') or request.path.startswith('/auth/'):
+        return jsonify({
+            "success": False,
+            "error": f"服务器内部错误: {str(e)}"
+        }), 500
+    # 对于页面请求，返回通用错误
+    return f"<h1>服务器错误</h1><p>{str(e)}</p>", 500
+
+
 # ============ 授权中间件 ============
 
 def require_auth(f):
@@ -1023,7 +1043,13 @@ def calculate_date():
     except Exception as e:
         import traceback
         traceback.print_exc()
-        print(f"[calculate_date] 异常: model={data.get('model','') if 'data' in dir() else '?'} tonnage={data.get('tonnage','') if 'data' in dir() else '?'} err={e}", flush=True)
+        try:
+            model_val = data.get('model', '?') if 'data' in locals() else '?'
+            tonnage_val = data.get('tonnage', '?') if 'data' in locals() else '?'
+        except:
+            model_val = '?'
+            tonnage_val = '?'
+        print(f"[calculate_date] 异常: model={model_val} tonnage={tonnage_val} err={e}", flush=True)
         return jsonify({"success": False, "error": f"计算异常: {str(e)}"})
 
 
