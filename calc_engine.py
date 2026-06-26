@@ -535,14 +535,14 @@ def calculate_delivery_date(model, tonnage_str, expected_date_str, occupied_capa
     if not intervals:
         return "请联系商务支持", f"从{expected_date_str}到{limit_date.strftime('%Y-%m-%d')}均无足够产能"
 
-    # 取最后一个区间的起始日期
+    # 取最后一个区间，必须包含上限日期
     last_interval = intervals[-1]
-    result_date = last_interval[0]
+    last_end = last_interval[1]
 
-    # 临时诊断：C310+70吨时返回详细计算过程
-    if model == "C310" and tonnage == 70:
-        caps_info = [(str(d), date_capacity_map.get(d, 0)) for d in sorted_dates]
-        return result_date.strftime("%Y-%m-%d"), f"诊断：limit={limit_date} intervals={[(str(s),str(e)) for s,e in intervals]} caps={caps_info[:10]}..."
+    if last_end < limit_date:
+        return "请联系商务支持", "最后一个产能充足区间未覆盖到上限日期"
+
+    result_date = last_interval[0]
 
     if result_date == expected_date:
         return expected_date_str, ""
