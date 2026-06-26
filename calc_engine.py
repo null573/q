@@ -280,54 +280,61 @@ def _read_date_column(sheet_id, start_row, row_count):
 
 
 def get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count):
-    """获取工作表数据 - 优先从预加载缓存读取"""
+    """获取工作表数据 - 优先从预加载缓存读取
+    优化：只读取A列（日期）和产能列，避免读取中间列导致数据量过大"""
     cache_key = f"{sheet_id}:{start_row}:{capacity_col}:{limit_cell}"
 
     # 1. 先检查后台预加载缓存（最快）
     preloaded = _get_preloaded_data(cache_key)
     if preloaded is not None:
-        # 预加载数据可能因为部署后FILE_ID变更而包含空数据，需要验证
         if preloaded.get("date_capacity_map"):
             return preloaded
-        # 预加载缓存数据为空，跳过，走API实时读取
 
     # 2. 再检查按需缓存
     cached = _get_from_memory(cache_key)
     if cached is not None:
         return cached
 
-    # 3. 从腾讯API读取（最慢，但必要时）
-    capacity_col_index = col_letter_to_index(capacity_col)
+    # 3. 从腾讯API读取（分两次读取，每次只读一列，大幅减少数据量）
+    # 例如C310：原来读A4:AD228=6750个单元格，现在读A4:A228+AD4:AD228=450个单元格
     end_row = start_row + row_count - 1
-    range_str = f"A{start_row}:{capacity_col}{end_row}"
-    grid_data = read_sheet_range(sheet_id, range_str)
-    rows = grid_data.get("rows", [])
+
+    # 读取日期列（A列）
+    date_range = f"A{start_row}:A{end_row}"
+    date_grid = read_sheet_range(sheet_id, date_range)
+    date_rows = date_grid.get("rows", [])
+
+    # 读取产能列
+    cap_range = f"{capacity_col}{start_row}:{capacity_col}{end_row}"
+    cap_grid = read_sheet_range(sheet_id, cap_range)
+    cap_rows = cap_grid.get("rows", [])
 
     date_capacity_map = {}
     dates_cached = []
 
-    for i, row in enumerate(rows):
-        values = row.get("values", [])
-        if len(values) < capacity_col_index + 1:
-            dates_cached.append(None)
-            continue
+    max_rows = max(len(date_rows), len(cap_rows))
+    for i in range(max_rows):
+        d = None
+        # 从日期列获取日期
+        if i < len(date_rows):
+            date_values = date_rows[i].get("values", [])
+            if date_values:
+                cv = date_values[0].get("cellValue")
+                if cv:
+                    date_val = parse_cell_value(cv)
+                    d = parse_date(date_val)
+        dates_cached.append(d)
 
-        cv = values[0].get("cellValue")
-        if cv:
-            date_val = parse_cell_value(cv)
-            d = parse_date(date_val)
-            dates_cached.append(d)
-        else:
-            dates_cached.append(None)
-            continue
-
-        cv = values[capacity_col_index].get("cellValue")
-        if not cv:
-            continue
-        cap_str = parse_cell_value(cv)
-        cap_val = parse_number(cap_str)
-        if cap_val is not None:
-            date_capacity_map[d] = cap_val
+        # 从产能列获取产能
+        if d is not None and i < len(cap_rows):
+            cap_values = cap_rows[i].get("values", [])
+            if cap_values:
+                cv = cap_values[0].get("cellValue")
+                if cv:
+                    cap_str = parse_cell_value(cv)
+                    cap_val = parse_number(cap_str)
+                    if cap_val is not None:
+                        date_capacity_map[d] = cap_val
 
     # 更新A列缓存
     date_col_cache_key = f"{sheet_id}:{start_row}"
