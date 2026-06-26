@@ -15,9 +15,17 @@ BASE_URL = "https://docs.qq.com/openapi/spreadsheet/v3"
 FILE_ID = "DRnhDemRIS25mdnFF"        # 产能数据表（新表格）
 CONFIG_FILE_ID = "DRnhDemRIS25mdnFF"  # 配置表（新表格）
 HTTP = requests.Session()
-adapter = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=20, max_retries=2)
+# 减少超时和重试次数，避免gunicorn worker超时被杀
+adapter = requests.adapters.HTTPAdapter(
+    pool_connections=10, pool_maxsize=20,
+    max_retries=1,
+    pool_block=True
+)
 HTTP.mount('https://', adapter)
 HTTP.mount('http://', adapter)
+
+# 快速超时配置
+_HTTP_TIMEOUT = 10  # 单个请求超时10秒
 
 # 外部注入的token获取函数
 _token_getter = None
@@ -118,7 +126,7 @@ def read_sheet_range(sheet_id, range_str, file_id=None):
     fid = file_id if file_id else FILE_ID
     url = f"{BASE_URL}/files/{fid}/{sheet_id}/{range_str}"
     try:
-        resp = HTTP.get(url, headers=get_headers(), timeout=30)
+        resp = HTTP.get(url, headers=get_headers(), timeout=_HTTP_TIMEOUT)
         if resp.status_code == 200:
             data = resp.json()
             # 检查腾讯API返回的业务错误码
@@ -129,11 +137,13 @@ def read_sheet_range(sheet_id, range_str, file_id=None):
             return data.get("gridData", {})
         print(f"[WARN] read_sheet_range HTTP {resp.status_code}: {range_str} {resp.text[:200]}", flush=True)
     except requests.exceptions.Timeout:
-        print(f"[WARN] read_sheet_range timeout: {range_str}", flush=True)
+        print(f"[WARN] read_sheet_range timeout ({_HTTP_TIMEOUT}s): {range_str}", flush=True)
+    except requests.exceptions.ConnectionError as e:
+        print(f"[WARN] read_sheet_range connection error: {e}", flush=True)
     except requests.exceptions.RequestException as e:
-        print(f"[WARN] read_sheet_range request error: {e} for {range_str}", flush=True)
+        print(f"[WARN] read_sheet_range request error: {e}", flush=True)
     except Exception as e:
-        print(f"[WARN] read_sheet_range unexpected error: {e} for {range_str}", flush=True)
+        print(f"[WARN] read_sheet_range unexpected error: {e}", flush=True)
     return {}
 
 
@@ -490,15 +500,22 @@ def _preload_all_models():
     """预抓取所有型号的产能数据到内存"""
     print(f"[preload] 开始预抓取 {len(MODEL_CONFIG)} 个型号...", flush=True)
     success = 0
+    consecutive_failures = 0
 
     for model, config in MODEL_CONFIG.items():
         try:
+            # 如果连续失败5次以上，说明token/网络有问题，跳过剩余预加载
+            if consecutive_failures >= 5:
+                print(f"[preload] 连续{consecutive_failures}次失败，跳过剩余型号预加载", flush=True)
+                break
+
             sheet_id, start_row, capacity_col, limit_cell, row_count = config
             cache_key = f"{sheet_id}:{start_row}:{capacity_col}:{limit_cell}"
 
             # 检查是否已有较新的预加载数据
             existing = _get_preloaded_data(cache_key)
             if existing is not None:
+                success += 1
                 continue  # 跳过，已有有效缓存
 
             capacity_col_index = col_letter_to_index(capacity_col)
@@ -506,6 +523,12 @@ def _preload_all_models():
             range_str = f"A{start_row}:{capacity_col}{end_row}"
             grid_data = read_sheet_range(sheet_id, range_str)
             rows = grid_data.get("rows", [])
+
+            if not rows:
+                consecutive_failures += 1
+                continue
+
+            consecutive_failures = 0  # 重置失败计数
 
             date_capacity_map = {}
             dates_cached = []
@@ -557,6 +580,11 @@ def _preload_all_models():
 
 def _preload_worker():
     """后台预抓取工作线程，根据北京时间动态调整间隔"""
+    # 首次启动时延迟5秒，避免与第一个用户请求竞争资源
+    _preload_stop_event.wait(5)
+    if _preload_stop_event.is_set():
+        return
+
     while not _preload_stop_event.is_set():
         try:
             _preload_all_models()

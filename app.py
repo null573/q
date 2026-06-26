@@ -35,9 +35,15 @@ OPEN_ID = os.environ.get('OPEN_ID', '9bc172e5338147d8a35c1438ea8d1577')
 
 BASE_URL = "https://docs.qq.com/openapi/spreadsheet/v3"
 HTTP = requests.Session()
-adapter = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=20, max_retries=2)
+# 减少超时和重试，避免worker超时
+adapter = requests.adapters.HTTPAdapter(
+    pool_connections=10, pool_maxsize=20,
+    max_retries=1,
+    pool_block=True
+)
 HTTP.mount('https://', adapter)
 HTTP.mount('http://', adapter)
+_HTTP_TIMEOUT = 10  # 单个请求10秒超时
 
 # 访问密码
 ACCESS_PASSWORD = os.environ.get('ACCESS_PASSWORD', 'queue2025')
@@ -118,7 +124,7 @@ def set_admin_secret(name, value):
             "Content-Type": "application/json",
         },
         json={"value": str(value)},
-        timeout=15,
+        timeout=_HTTP_TIMEOUT,
     )
     if resp.status_code not in (200, 201):
         raise RuntimeError(f"写入 Render 环境变量失败 {resp.status_code}: {resp.text[:200]}")
@@ -133,7 +139,7 @@ def set_admin_secret(name, value):
             "Content-Type": "application/json",
         },
         json={"clearCache": "do_not_clear"},
-        timeout=15,
+        timeout=_HTTP_TIMEOUT,
     )
     if deploy_resp.status_code not in (200, 201, 409):
         raise RuntimeError(f"已写入环境变量，但触发 Render 部署失败 {deploy_resp.status_code}: {deploy_resp.text[:200]}")
@@ -282,7 +288,7 @@ def read_users():
         return _users_cache["data"]
 
     url = f"{BASE_URL}/files/{USER_FILE_ID}/{USER_SHEET_ID}/A2:F200"
-    resp = HTTP.get(url, headers=get_headers(), timeout=30)
+    resp = HTTP.get(url, headers=get_headers(), timeout=_HTTP_TIMEOUT)
     users = []
     if resp.status_code == 200:
         data = resp.json()
@@ -429,7 +435,7 @@ def read_sheet_range(sheet_id, range_str, file_id=None):
     fid = file_id if file_id else FILE_ID
     url = f"{BASE_URL}/files/{fid}/{sheet_id}/{range_str}"
     try:
-        resp = HTTP.get(url, headers=get_headers(), timeout=30)
+        resp = HTTP.get(url, headers=get_headers(), timeout=_HTTP_TIMEOUT)
         if resp.status_code == 200:
             data = resp.json()
             # 检查腾讯API返回的业务错误码
@@ -490,7 +496,7 @@ def batch_update(requests_body):
     """执行批量更新操作"""
     url = f"{BASE_URL}/files/{FILE_ID}/batchUpdate"
     try:
-        resp = HTTP.post(url, headers=get_headers(), json=requests_body, timeout=30)
+        resp = HTTP.post(url, headers=get_headers(), json=requests_body, timeout=_HTTP_TIMEOUT)
         return resp
     except Exception as e:
         print(f"[WARN] batch_update exception: {e}", flush=True)
@@ -521,7 +527,7 @@ def ensure_sheet_rows(min_row_count):
 
             # 先获取当前表格信息
             url = f"{BASE_URL}/files/{FILE_ID}"
-            resp = HTTP.get(url, headers=get_headers(), timeout=15)
+            resp = HTTP.get(url, headers=get_headers(), timeout=_HTTP_TIMEOUT)
             if resp.status_code != 200:
                 print(f"[WARN] ensure_sheet_rows get file info failed: HTTP {resp.status_code}", flush=True)
                 return False
@@ -1737,7 +1743,7 @@ def update_password():
 
         # 读取用户表找到对应行
         url = f"{BASE_URL}/files/{USER_FILE_ID}/{USER_SHEET_ID}/A2:C200"
-        resp = HTTP.get(url, headers=get_headers(), timeout=30)
+        resp = HTTP.get(url, headers=get_headers(), timeout=_HTTP_TIMEOUT)
         if resp.status_code != 200:
             return jsonify({"success": False, "error": "读取用户表失败"})
 
@@ -1774,7 +1780,7 @@ def update_password():
             f"{BASE_URL}/files/{USER_FILE_ID}/batchUpdate",
             headers=get_headers(),
             json=body,
-            timeout=30
+            timeout=_HTTP_TIMEOUT
         )
         result = update_resp.json()
         if "responses" in result:
@@ -1905,7 +1911,7 @@ def admin_trigger_deploy():
                 "Content-Type": "application/json",
             },
             json={"clearCache": "do_not_clear"},
-            timeout=15,
+            timeout=_HTTP_TIMEOUT,
         )
         if resp.status_code in (200, 201, 409):
             return jsonify({"success": True, "status": resp.status_code})
@@ -2187,7 +2193,7 @@ def test_connection():
     """测试腾讯表格连接"""
     try:
         url = f"{BASE_URL}/files/{FILE_ID}"
-        resp = HTTP.get(url, headers=get_headers(), timeout=30)
+        resp = HTTP.get(url, headers=get_headers(), timeout=_HTTP_TIMEOUT)
         if resp.status_code == 200:
             data = resp.json()
             sheets = data.get("properties", [])
