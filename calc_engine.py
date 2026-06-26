@@ -539,11 +539,6 @@ def calculate_delivery_date(model, tonnage_str, expected_date_str, occupied_capa
     last_interval = intervals[-1]
     last_end = last_interval[1]
 
-    # 临时诊断：R6048返回详细计算过程
-    if model == "R6048":
-        caps_info = [(str(d), date_capacity_map.get(d, 0)) for d in sorted_dates]
-        return result_date.strftime("%Y-%m-%d"), f"诊断：limit={limit_date} intervals={[(str(s),str(e)) for s,e in intervals]} last_end={last_end} caps={caps_info[:15]}..."
-
     if last_end < limit_date:
         return "请联系商务支持", "请联系商务支持"
 
