@@ -502,19 +502,46 @@ def calculate_delivery_date(model, tonnage_str, expected_date_str, occupied_capa
         else:
             return "请联系商务支持", "上限日期未设置且无排产数据"
 
-    # 从期望日期开始，逐日向后查找第一个产能 >= 吨位的日期
-    candidate_date = expected_date
-    while candidate_date <= limit_date:
-        cap = date_capacity_map.get(candidate_date)
-        if cap is not None and cap > 0 and cap >= tonnage:
-            if candidate_date == expected_date:
-                return expected_date_str, ""
-            return candidate_date.strftime("%Y-%m-%d"), ""
-        candidate_date += timedelta(days=1)
+    # 按日期排序，只考虑期望日期到上限日期之间的日期
+    sorted_dates = sorted([d for d in date_capacity_map.keys() if expected_date <= d <= limit_date])
 
-    # 范围内无足够产能
-    max_data_date = max(date_capacity_map.keys())
-    return "请联系商务支持", f"从{expected_date_str}到{limit_date.strftime('%Y-%m-%d')}均无足够产能，排产数据到{max_data_date.strftime('%m月%d日')}"
+    if not sorted_dates:
+        max_data_date = max(date_capacity_map.keys())
+        return "请联系商务支持", f"排产数据只到{max_data_date.strftime('%m月%d日')}，期望日期{expected_date_str}超出范围"
+
+    # 1. 所有日期产能都 >= 吨位 → 返回期望日期
+    all_sufficient = all(date_capacity_map[d] >= tonnage for d in sorted_dates)
+    if all_sufficient:
+        return expected_date_str, ""
+
+    # 2. 查找产能都 >= 吨位的连续区间，取最后一个区间的最小日期
+    intervals = []
+    current_start = None
+
+    for d in sorted_dates:
+        cap = date_capacity_map.get(d, 0)
+        if cap >= tonnage:
+            if current_start is None:
+                current_start = d
+        else:
+            if current_start is not None:
+                intervals.append((current_start, d - timedelta(days=1)))
+                current_start = None
+
+    # 处理最后一个未关闭的区间
+    if current_start is not None:
+        intervals.append((current_start, sorted_dates[-1]))
+
+    if not intervals:
+        return "请联系商务支持", f"从{expected_date_str}到{limit_date.strftime('%Y-%m-%d')}均无足够产能"
+
+    # 取最后一个区间的起始日期
+    last_interval = intervals[-1]
+    result_date = last_interval[0]
+
+    if result_date == expected_date:
+        return expected_date_str, ""
+    return result_date.strftime("%Y-%m-%d"), ""
 
 
 def clear_cache():
