@@ -2303,6 +2303,25 @@ def refresh_capacity_data_api():
     })
 
 
+@app.route('/api/cache-status', methods=['GET'])
+@require_auth
+def cache_status_api():
+    """查询当前缓存状态：已预加载的型号数量、内存缓存条目数"""
+    from calc_engine import _preload_cache, _preload_cache_lock, _memory_cache, _memory_cache_lock
+    with _preload_cache_lock:
+        preload_count = len(_preload_cache)
+        preloaded_models = list(_preload_cache.keys())
+    with _memory_cache_lock:
+        mem_count = len(_memory_cache)
+    return jsonify({
+        "success": True,
+        "preloaded_models_count": preload_count,
+        "preloaded_models": preloaded_models,
+        "memory_cache_entries": mem_count,
+        "total_models": len(MODEL_CONFIG)
+    })
+
+
 def read_sheet_range_app(sheet_id, range_str, file_id=None):
     """app.py版本的read_sheet_range，用于诊断对比"""
     fid = file_id if file_id else FILE_ID

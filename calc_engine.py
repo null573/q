@@ -25,8 +25,8 @@ adapter = requests.adapters.HTTPAdapter(
 HTTP.mount('https://', adapter)
 HTTP.mount('http://', adapter)
 
-# 快速超时配置
-_HTTP_TIMEOUT = 3  # 单个请求3秒超时
+# 超时配置：10秒给并发加载留出足够时间，同时避免Gunicorn worker被kill
+_HTTP_TIMEOUT = 10  # 单个请求10秒超时
 
 # 外部注入的token获取函数
 _token_getter = None
@@ -127,8 +127,8 @@ def read_sheet_range(sheet_id, range_str, file_id=None):
     fid = file_id if file_id else FILE_ID
     url = f"{BASE_URL}/files/{fid}/{sheet_id}/{range_str}"
     try:
-        # 使用新的requests.get()，不使用Session，避免连接池问题
-        resp = requests.get(url, headers=get_headers(), timeout=_HTTP_TIMEOUT)
+        # 使用Session复用TCP连接，减少并发时的连接建立开销
+        resp = HTTP.get(url, headers=get_headers(), timeout=_HTTP_TIMEOUT)
         if resp.status_code == 200:
             data = resp.json()
             # 检查腾讯API返回的业务错误码
@@ -506,7 +506,7 @@ _preload_stop_event = threading.Event()
 
 
 def _preload_single_model(model, config):
-    """预抓取单个型号的产能数据"""
+    """预抓取单个型号的产能数据（带一次重试）"""
     try:
         sheet_id, start_row, capacity_col, limit_cell, row_count = config
         cache_key = f"{sheet_id}:{start_row}:{capacity_col}:{limit_cell}"
@@ -517,15 +517,24 @@ def _preload_single_model(model, config):
             return True, model, "已有缓存"
 
         end_row = start_row + row_count - 1
-
-        # 分两次读取，每次只读一列
         date_range = f"A{start_row}:A{end_row}"
+        cap_range = f"{capacity_col}{start_row}:{capacity_col}{end_row}"
+
+        # 首次读取
         date_grid = read_sheet_range(sheet_id, date_range)
         date_rows = date_grid.get("rows", [])
-
-        cap_range = f"{capacity_col}{start_row}:{capacity_col}{end_row}"
         cap_grid = read_sheet_range(sheet_id, cap_range)
         cap_rows = cap_grid.get("rows", [])
+
+        # 如果数据为空，等待1秒后重试一次（可能是网络瞬态问题）
+        if not date_rows and not cap_rows:
+            print(f"[preload] {model} 首次读取为空，1秒后重试...", flush=True)
+            import time as _t
+            _t.sleep(1)
+            date_grid = read_sheet_range(sheet_id, date_range)
+            date_rows = date_grid.get("rows", [])
+            cap_grid = read_sheet_range(sheet_id, cap_range)
+            cap_rows = cap_grid.get("rows", [])
 
         if not date_rows and not cap_rows:
             return False, model, "数据为空"
@@ -573,11 +582,11 @@ def _preload_single_model(model, config):
 
 def _preload_all_models():
     """预抓取所有型号的产能数据到内存 - 并发版本"""
-    print(f"[preload] 开始预抓取 {len(MODEL_CONFIG)} 个型号（并发5线程）...", flush=True)
+    print(f"[preload] 开始预抓取 {len(MODEL_CONFIG)} 个型号（并发3线程）...", flush=True)
     success = 0
     errors = []
 
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=3) as executor:
         futures = {
             executor.submit(_preload_single_model, model, config): model
             for model, config in MODEL_CONFIG.items()
