@@ -3,6 +3,7 @@
 优化点：后台定时预抓取腾讯表格数据到内存缓存，计算时直接读内存
 """
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, date
 import json
 import os
@@ -504,90 +505,99 @@ _preload_thread = None
 _preload_stop_event = threading.Event()
 
 
+def _preload_single_model(model, config):
+    """预抓取单个型号的产能数据"""
+    try:
+        sheet_id, start_row, capacity_col, limit_cell, row_count = config
+        cache_key = f"{sheet_id}:{start_row}:{capacity_col}:{limit_cell}"
+
+        # 检查是否已有较新的预加载数据
+        existing = _get_preloaded_data(cache_key)
+        if existing is not None:
+            return True, model, "已有缓存"
+
+        end_row = start_row + row_count - 1
+
+        # 分两次读取，每次只读一列
+        date_range = f"A{start_row}:A{end_row}"
+        date_grid = read_sheet_range(sheet_id, date_range)
+        date_rows = date_grid.get("rows", [])
+
+        cap_range = f"{capacity_col}{start_row}:{capacity_col}{end_row}"
+        cap_grid = read_sheet_range(sheet_id, cap_range)
+        cap_rows = cap_grid.get("rows", [])
+
+        if not date_rows and not cap_rows:
+            return False, model, "数据为空"
+
+        date_capacity_map = {}
+        dates_cached = []
+
+        max_rows = max(len(date_rows), len(cap_rows))
+        for i in range(max_rows):
+            d = None
+            if i < len(date_rows):
+                date_values = date_rows[i].get("values", [])
+                if date_values:
+                    cv = date_values[0].get("cellValue")
+                    if cv:
+                        date_val = parse_cell_value(cv)
+                        d = parse_date(date_val)
+            dates_cached.append(d)
+
+            if d is not None and i < len(cap_rows):
+                cap_values = cap_rows[i].get("values", [])
+                if cap_values:
+                    cv = cap_values[0].get("cellValue")
+                    if cv:
+                        cap_str = parse_cell_value(cv)
+                        cap_val = parse_number(cap_str)
+                        if cap_val is not None:
+                            date_capacity_map[d] = cap_val
+
+        limit_date = _read_limit_date(sheet_id, limit_cell)
+
+        result = {
+            "date_capacity_map": date_capacity_map,
+            "limit_date": limit_date
+        }
+
+        _set_preload_cache(cache_key, result)
+        date_col_cache_key = f"{sheet_id}:{start_row}"
+        _set_memory_cache(date_col_cache_key, dates_cached)
+
+        return True, model, ""
+    except Exception as e:
+        return False, model, str(e)
+
+
 def _preload_all_models():
-    """预抓取所有型号的产能数据到内存"""
-    print(f"[preload] 开始预抓取 {len(MODEL_CONFIG)} 个型号...", flush=True)
+    """预抓取所有型号的产能数据到内存 - 并发版本"""
+    print(f"[preload] 开始预抓取 {len(MODEL_CONFIG)} 个型号（并发5线程）...", flush=True)
     success = 0
-    consecutive_failures = 0
+    errors = []
 
-    for model, config in MODEL_CONFIG.items():
-        try:
-            # 如果连续失败5次以上，说明token/网络有问题，跳过剩余预加载
-            if consecutive_failures >= 5:
-                print(f"[preload] 连续{consecutive_failures}次失败，跳过剩余型号预加载", flush=True)
-                break
-
-            sheet_id, start_row, capacity_col, limit_cell, row_count = config
-            cache_key = f"{sheet_id}:{start_row}:{capacity_col}:{limit_cell}"
-
-            # 检查是否已有较新的预加载数据
-            existing = _get_preloaded_data(cache_key)
-            if existing is not None:
-                success += 1
-                continue  # 跳过，已有有效缓存
-
-            end_row = start_row + row_count - 1
-
-            # 优化：分两次读取，每次只读一列，避免大数据量超时
-            date_range = f"A{start_row}:A{end_row}"
-            date_grid = read_sheet_range(sheet_id, date_range)
-            date_rows = date_grid.get("rows", [])
-
-            cap_range = f"{capacity_col}{start_row}:{capacity_col}{end_row}"
-            cap_grid = read_sheet_range(sheet_id, cap_range)
-            cap_rows = cap_grid.get("rows", [])
-
-            if not date_rows and not cap_rows:
-                consecutive_failures += 1
-                continue
-
-            consecutive_failures = 0  # 重置失败计数
-
-            date_capacity_map = {}
-            dates_cached = []
-
-            max_rows = max(len(date_rows), len(cap_rows))
-            for i in range(max_rows):
-                d = None
-                if i < len(date_rows):
-                    date_values = date_rows[i].get("values", [])
-                    if date_values:
-                        cv = date_values[0].get("cellValue")
-                        if cv:
-                            date_val = parse_cell_value(cv)
-                            d = parse_date(date_val)
-                dates_cached.append(d)
-
-                if d is not None and i < len(cap_rows):
-                    cap_values = cap_rows[i].get("values", [])
-                    if cap_values:
-                        cv = cap_values[0].get("cellValue")
-                        if cv:
-                            cap_str = parse_cell_value(cv)
-                            cap_val = parse_number(cap_str)
-                            if cap_val is not None:
-                                date_capacity_map[d] = cap_val
-
-            # 读取上限日期
-            limit_date = _read_limit_date(sheet_id, limit_cell)
-
-            result = {
-                "date_capacity_map": date_capacity_map,
-                "limit_date": limit_date
-            }
-
-            # 写入预加载缓存
-            _set_preload_cache(cache_key, result)
-
-            # 同时更新A列缓存
-            date_col_cache_key = f"{sheet_id}:{start_row}"
-            _set_memory_cache(date_col_cache_key, dates_cached)
-
-            success += 1
-        except Exception as e:
-            print(f"[preload] {model} 预抓取失败: {e}", flush=True)
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {
+            executor.submit(_preload_single_model, model, config): model
+            for model, config in MODEL_CONFIG.items()
+        }
+        for future in as_completed(futures):
+            model = futures[future]
+            try:
+                ok, m, err = future.result()
+                if ok:
+                    success += 1
+                else:
+                    errors.append(f"{m}: {err}")
+                    print(f"[preload] {m} 失败: {err}", flush=True)
+            except Exception as e:
+                errors.append(f"{model}: {e}")
+                print(f"[preload] {model} 异常: {e}", flush=True)
 
     print(f"[preload] 预抓取完成: {success}/{len(MODEL_CONFIG)} 个型号", flush=True)
+    if errors:
+        print(f"[preload] 失败详情: {errors[:5]}", flush=True)
     return success
 
 

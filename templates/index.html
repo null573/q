@@ -7,11 +7,11 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>销售排队系统</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=51">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=52">
     <script>
         // 版本检查：如果服务器版本更新，自动刷新页面
         (function(){
-            var serverVersion = 47;
+            var serverVersion = 52;
             var localVersion = parseInt(localStorage.getItem('app_version') || '0');
             if (localVersion && localVersion < serverVersion) {
                 localStorage.setItem('app_version', serverVersion);
@@ -234,7 +234,7 @@
 
     <div id="toast" class="toast"></div>
 
-    <script src="{{ url_for('static', filename='js/app.v51.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app.v52.js') }}"></script>
 </body>
 </html>
 
