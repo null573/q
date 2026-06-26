@@ -43,7 +43,7 @@ adapter = requests.adapters.HTTPAdapter(
 )
 HTTP.mount('https://', adapter)
 HTTP.mount('http://', adapter)
-_HTTP_TIMEOUT = 10  # 单个请求10秒超时
+_HTTP_TIMEOUT = 5  # 单个请求5秒超时，避免总请求时间超过Render限制
 
 # 访问密码
 ACCESS_PASSWORD = os.environ.get('ACCESS_PASSWORD', 'queue2025')
@@ -965,19 +965,43 @@ def calculate_date():
         import time
         now = time.time()
 
-        # 清理超时的临时行
+        # 1. 缓存快速路径检查（在计算之前）
+        cache_key = f"{model}:{tonnage}:{expected_date}"
+        if not force_refresh:
+            import time as _time_module_calc
+            if (_calc_result_cache.get("key") == cache_key
+                and _calc_result_cache.get("result")
+                and _time_module_calc.time() - _calc_result_cache.get("timestamp", 0) < _CALC_CACHE_TTL):
+                return jsonify({
+                    "success": True,
+                    "calculated_date": _calc_result_cache["result"],
+                    "row_index": int(pending_row_index) if pending_row_index else 0,
+                    "message": ""
+                })
+
+        # 2. 核心计算（最关键路径，只做必要的API调用）
+        start_time = time.time()
+        calculated_date, error_msg = calculate_delivery_date(model, tonnage, expected_date)
+        calc_time_ms = round((time.time() - start_time) * 1000, 2)
+
+        if error_msg:
+            return jsonify({
+                "success": False,
+                "error": error_msg,
+                "row_index": int(pending_row_index) if pending_row_index else 0
+            })
+
+        # 3. 清理超时的临时行（非关键路径，失败不影响结果）
         try:
             _cleanup_expired_temp_rows()
         except Exception as e:
             print(f"[calculate_date] _cleanup_expired_temp_rows 失败: {e}", flush=True)
 
-        # 1. 确定目标行：始终复用同一行（只要没提交）
-        target_row = 0
+        # 4. 确定目标行（非关键路径，失败不影响计算结果）
+        target_row = int(pending_row_index) if pending_row_index else 0
         temp_key = f"{submitter_id}"
 
-        if pending_row_index > 0:
-            target_row = pending_row_index
-        else:
+        if target_row == 0:
             with _temp_row_lock:
                 if temp_key in _temp_row_tracker:
                     tracked = _temp_row_tracker[temp_key]
@@ -994,38 +1018,15 @@ def calculate_date():
         if target_row == 0:
             try:
                 target_row = get_next_empty_row(SHEET_ID, start_from=2)
-                ensure_sheet_rows(target_row + 10)
+                try:
+                    ensure_sheet_rows(target_row + 10)
+                except:
+                    pass
             except Exception as e:
-                print(f"[calculate_date] get_next_empty_row/ensure_sheet_rows 失败: {e}", flush=True)
-                target_row = 3  # 使用默认行号，避免前端出错
+                print(f"[calculate_date] get_next_empty_row 失败: {e}", flush=True)
+                target_row = 3  # 默认行号
 
-        # 2. 缓存预查
-        cache_key = f"{model}:{tonnage}:{expected_date}"
-        if not force_refresh:
-            import time as _time_module_calc
-            if (_calc_result_cache.get("key") == cache_key
-                and _calc_result_cache.get("result")
-                and _time_module_calc.time() - _calc_result_cache.get("timestamp", 0) < _CALC_CACHE_TTL):
-                return jsonify({
-                    "success": True,
-                    "calculated_date": _calc_result_cache["result"],
-                    "row_index": target_row,
-                    "message": ""
-                })
-
-        # 3. 直接本地计算（替代写入腾讯表格触发公式）
-        start_time = time.time()
-        calculated_date, error_msg = calculate_delivery_date(model, tonnage, expected_date)
-        calc_time_ms = round((time.time() - start_time) * 1000, 2)
-
-        if error_msg:
-            return jsonify({
-                "success": False,
-                "error": error_msg,
-                "row_index": target_row
-            })
-
-        # 4. 记录临时行信息
+        # 5. 记录临时行信息
         with _temp_row_lock:
             _temp_row_tracker[temp_key] = {
                 "row_index": target_row,
@@ -1033,7 +1034,7 @@ def calculate_date():
                 "submitter_id": submitter_id
             }
 
-        # 5. 更新缓存
+        # 6. 更新缓存
         if not force_refresh:
             _calc_result_cache["key"] = cache_key
             _calc_result_cache["result"] = calculated_date

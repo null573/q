@@ -25,7 +25,7 @@ HTTP.mount('https://', adapter)
 HTTP.mount('http://', adapter)
 
 # 快速超时配置
-_HTTP_TIMEOUT = 10  # 单个请求超时10秒
+_HTTP_TIMEOUT = 5  # 单个请求超时5秒，避免总请求超时
 
 # 外部注入的token获取函数
 _token_getter = None
