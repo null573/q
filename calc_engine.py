@@ -126,7 +126,8 @@ def read_sheet_range(sheet_id, range_str, file_id=None):
     fid = file_id if file_id else FILE_ID
     url = f"{BASE_URL}/files/{fid}/{sheet_id}/{range_str}"
     try:
-        resp = HTTP.get(url, headers=get_headers(), timeout=_HTTP_TIMEOUT)
+        # 使用新的requests.get()，不使用Session，避免连接池问题
+        resp = requests.get(url, headers=get_headers(), timeout=_HTTP_TIMEOUT)
         if resp.status_code == 200:
             data = resp.json()
             # 检查腾讯API返回的业务错误码
