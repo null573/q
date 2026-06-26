@@ -2257,7 +2257,31 @@ def diag_calc_engine():
         "keys": list(r2.keys())[:5]
     }
     
-    # Test 3: calculate_delivery_date
+    # Test 3: R6048 数据读取
+    t0 = time.time()
+    from calc_engine import read_sheet_range, parse_cell_value, parse_date
+    r3 = read_sheet_range("000004", "A3:W40")
+    rows = r3.get("rows", [])
+    r6048_data = []
+    for i, row in enumerate(rows):
+        values = row.get("values", [])
+        if len(values) > 0:
+            date_cv = values[0].get("cellValue")
+            date_val = parse_cell_value(date_cv) if date_cv else None
+            d = parse_date(date_val) if date_val else None
+            if d and str(d) >= "2026-06-23":
+                w_val = None
+                if len(values) > 22:
+                    w_cv = values[22].get("cellValue")
+                    w_val = parse_cell_value(w_cv) if w_cv else None
+                r6048_data.append({"date": str(d), "w_col": w_val})
+    t1 = time.time()
+    results["r6048_w_col_data"] = {
+        "elapsed_ms": round((t1 - t0) * 1000, 2),
+        "data": r6048_data[:15]
+    }
+    
+    # Test 4: calculate_delivery_date
     t0 = time.time()
     from calc_engine import calculate_delivery_date
     date, err = calculate_delivery_date("C310", "7", "2026-06-27")
