@@ -514,7 +514,11 @@ def calculate_delivery_date(model, tonnage_str, expected_date_str, occupied_capa
     result_date = max_low_date + timedelta(days=1)
 
     if result_date > limit_date:
-        return "请联系商务支持", "请联系商务支持"
+        cap_samples = dict(list(date_capacity_map.items())[:5])
+        print(f"[calc-DEBUG] model={model} tonnage={tonnage} expected={expected_date} limit={limit_date} "
+              f"max_low={max_low_date} result={result_date} filtered_count={len(filtered_caps)} "
+              f"low_count={len(low_cap_dates)} cap_samples={cap_samples}", flush=True)
+        return "请联系商务支持", f"上限日期{limit_date}早于结果日期{result_date}（产能不足日期到{max_low_date}）"
 
     return result_date.strftime("%Y-%m-%d"), ""
 
