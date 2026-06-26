@@ -1679,10 +1679,15 @@ async function refreshCapacityData() {
     const originalHTML = btn.innerHTML;
     btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="animation:spin 1s linear infinite"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg> 刷新中...';
     try {
+        // 100秒超时控制器，避免浏览器无限等待
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 100000);
         const r = await apiFetch(`${API_BASE}/api/refresh-capacity-data`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
+            headers: { 'Content-Type': 'application/json' },
+            signal: controller.signal
         });
+        clearTimeout(timeoutId);
         const data = await r.json();
         if (data.success) {
             const after = data.after_refresh || {};

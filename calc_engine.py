@@ -25,8 +25,8 @@ adapter = requests.adapters.HTTPAdapter(
 HTTP.mount('https://', adapter)
 HTTP.mount('http://', adapter)
 
-# 超时配置：10秒给并发加载留出足够时间，同时避免Gunicorn worker被kill
-_HTTP_TIMEOUT = 10  # 单个请求10秒超时
+# 超时配置：5秒平衡速度和可靠性
+_HTTP_TIMEOUT = 5  # 单个请求5秒超时
 
 # 外部注入的token获取函数
 _token_getter = None
@@ -528,7 +528,7 @@ _preload_stop_event = threading.Event()
 
 
 def _preload_single_model(model, config):
-    """预抓取单个型号的产能数据（带一次重试）"""
+    """预抓取单个型号的产能数据"""
     try:
         sheet_id, start_row, capacity_col, limit_cell, row_count = config
         cache_key = f"{sheet_id}:{start_row}:{capacity_col}:{limit_cell}"
@@ -542,21 +542,11 @@ def _preload_single_model(model, config):
         date_range = f"A{start_row}:A{end_row}"
         cap_range = f"{capacity_col}{start_row}:{capacity_col}{end_row}"
 
-        # 首次读取
         date_grid = read_sheet_range(sheet_id, date_range)
         date_rows = date_grid.get("rows", [])
+
         cap_grid = read_sheet_range(sheet_id, cap_range)
         cap_rows = cap_grid.get("rows", [])
-
-        # 如果数据为空，等待1秒后重试一次（可能是网络瞬态问题）
-        if not date_rows and not cap_rows:
-            print(f"[preload] {model} 首次读取为空，1秒后重试...", flush=True)
-            import time as _t
-            _t.sleep(1)
-            date_grid = read_sheet_range(sheet_id, date_range)
-            date_rows = date_grid.get("rows", [])
-            cap_grid = read_sheet_range(sheet_id, cap_range)
-            cap_rows = cap_grid.get("rows", [])
 
         if not date_rows and not cap_rows:
             return False, model, "数据为空"
@@ -603,22 +593,28 @@ def _preload_single_model(model, config):
 
 
 def _preload_all_models():
-    """预抓取所有型号的产能数据到内存 - 串行版本（避免并发限流或异常）"""
-    print(f"[preload] 开始预抓取 {len(MODEL_CONFIG)} 个型号（串行）...", flush=True)
+    """预抓取所有型号的产能数据到内存 - 3并发（平衡速度和限流风险）"""
+    print(f"[preload] 开始预抓取 {len(MODEL_CONFIG)} 个型号（并发3线程）...", flush=True)
     success = 0
     errors = []
 
-    for model, config in MODEL_CONFIG.items():
-        try:
-            ok, m, err = _preload_single_model(model, config)
-            if ok:
-                success += 1
-            else:
-                errors.append(f"{m}: {err}")
-                print(f"[preload] {m} 失败: {err}", flush=True)
-        except Exception as e:
-            errors.append(f"{model}: {e}")
-            print(f"[preload] {model} 异常: {e}", flush=True)
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {
+            executor.submit(_preload_single_model, model, config): model
+            for model, config in MODEL_CONFIG.items()
+        }
+        for future in as_completed(futures):
+            model = futures[future]
+            try:
+                ok, m, err = future.result()
+                if ok:
+                    success += 1
+                else:
+                    errors.append(f"{m}: {err}")
+                    print(f"[preload] {m} 失败: {err}", flush=True)
+            except Exception as e:
+                errors.append(f"{model}: {e}")
+                print(f"[preload] {model} 异常: {e}", flush=True)
 
     print(f"[preload] 预抓取完成: {success}/{len(MODEL_CONFIG)} 个型号", flush=True)
     if errors:
