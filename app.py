@@ -2274,8 +2274,7 @@ def diag_calc_engine():
 @app.route('/api/refresh-capacity-data', methods=['POST'])
 @require_auth
 def refresh_capacity_data_api():
-    """手动刷新产能数据：清除所有缓存并在后台线程重新加载所有型号"""
-    import threading
+    """手动刷新产能数据：同步执行，清除所有缓存并重新加载所有型号，返回实际结果"""
     from calc_engine import _preload_cache, _preload_cache_lock, _memory_cache, _memory_cache_lock
 
     # 获取刷新前缓存状态
@@ -2284,21 +2283,30 @@ def refresh_capacity_data_api():
     with _memory_cache_lock:
         mem_count = len(_memory_cache)
 
-    def _do_refresh():
-        try:
-            refresh_capacity_data()
-        except Exception as e:
-            print(f"[refresh-api] 后台刷新异常: {e}", flush=True)
-
-    # 在后台线程执行刷新，避免阻塞HTTP响应
-    threading.Thread(target=_do_refresh, daemon=True).start()
+    try:
+        success, total, err_msg, token_status = refresh_capacity_data()
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": f"刷新异常: {str(e)}",
+            "before_refresh": {
+                "preloaded_models": preload_count,
+                "memory_cache_entries": mem_count
+            }
+        }), 500
 
     return jsonify({
         "success": True,
-        "message": f"产能数据刷新已启动（后台线程正在重新加载 {len(MODEL_CONFIG)} 个型号）",
+        "message": f"产能数据刷新完成，成功加载 {success}/{total} 个型号",
         "before_refresh": {
             "preloaded_models": preload_count,
             "memory_cache_entries": mem_count
+        },
+        "after_refresh": {
+            "preloaded_models": success,
+            "total_models": total,
+            "token_status": token_status,
+            "error_msg": err_msg
         }
     })
 
@@ -2306,8 +2314,8 @@ def refresh_capacity_data_api():
 @app.route('/api/cache-status', methods=['GET'])
 @require_auth
 def cache_status_api():
-    """查询当前缓存状态：已预加载的型号数量、内存缓存条目数"""
-    from calc_engine import _preload_cache, _preload_cache_lock, _memory_cache, _memory_cache_lock
+    """查询当前缓存状态：已预加载的型号数量、内存缓存条目数、Token状态"""
+    from calc_engine import _preload_cache, _preload_cache_lock, _memory_cache, _memory_cache_lock, get_token_status
     with _preload_cache_lock:
         preload_count = len(_preload_cache)
         preloaded_models = list(_preload_cache.keys())
@@ -2318,7 +2326,8 @@ def cache_status_api():
         "preloaded_models_count": preload_count,
         "preloaded_models": preloaded_models,
         "memory_cache_entries": mem_count,
-        "total_models": len(MODEL_CONFIG)
+        "total_models": len(MODEL_CONFIG),
+        "token_status": get_token_status()
     })
 
 

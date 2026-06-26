@@ -133,9 +133,16 @@ def read_sheet_range(sheet_id, range_str, file_id=None):
             data = resp.json()
             # 检查腾讯API返回的业务错误码
             if "code" in data and data.get("code") != 0:
+                err_code = data.get("code")
                 err_msg = data.get("message", "unknown error")
-                print(f"[WARN] Tencent API error: {data.get('code')} {err_msg} for {range_str}", flush=True)
+                # 400006 = Authentication Internal Error，通常是Token过期
+                if err_code == 400006 or "Authentication" in err_msg or "auth" in err_msg.lower():
+                    _set_token_status("expired")
+                    print(f"[WARN] Tencent API token expired: {err_code} {err_msg} for {range_str}", flush=True)
+                else:
+                    print(f"[WARN] Tencent API error: {err_code} {err_msg} for {range_str}", flush=True)
                 return {}
+            _set_token_status("ok")
             return data.get("gridData", {})
         print(f"[WARN] read_sheet_range HTTP {resp.status_code}: {range_str} {resp.text[:200]}", flush=True)
     except requests.exceptions.Timeout:
@@ -213,9 +220,24 @@ _memory_cache_lock = threading.RLock()
 _preload_cache = {}
 _preload_cache_lock = threading.RLock()
 
+# Token 状态跟踪："ok" | "expired" | "unknown"
+_token_status = "unknown"
+_token_status_lock = threading.Lock()
+
 # 缓存TTL配置
 CACHE_TTL = 300  # 5分钟（按需缓存）
 PRELOAD_INTERVAL = 300  # 后台每300秒（5分钟）预抓取一次
+
+
+def _set_token_status(status):
+    global _token_status
+    with _token_status_lock:
+        _token_status = status
+
+
+def get_token_status():
+    with _token_status_lock:
+        return _token_status
 
 
 def _get_from_memory(cache_key):
@@ -581,28 +603,22 @@ def _preload_single_model(model, config):
 
 
 def _preload_all_models():
-    """预抓取所有型号的产能数据到内存 - 并发版本"""
-    print(f"[preload] 开始预抓取 {len(MODEL_CONFIG)} 个型号（并发3线程）...", flush=True)
+    """预抓取所有型号的产能数据到内存 - 串行版本（避免并发限流或异常）"""
+    print(f"[preload] 开始预抓取 {len(MODEL_CONFIG)} 个型号（串行）...", flush=True)
     success = 0
     errors = []
 
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        futures = {
-            executor.submit(_preload_single_model, model, config): model
-            for model, config in MODEL_CONFIG.items()
-        }
-        for future in as_completed(futures):
-            model = futures[future]
-            try:
-                ok, m, err = future.result()
-                if ok:
-                    success += 1
-                else:
-                    errors.append(f"{m}: {err}")
-                    print(f"[preload] {m} 失败: {err}", flush=True)
-            except Exception as e:
-                errors.append(f"{model}: {e}")
-                print(f"[preload] {model} 异常: {e}", flush=True)
+    for model, config in MODEL_CONFIG.items():
+        try:
+            ok, m, err = _preload_single_model(model, config)
+            if ok:
+                success += 1
+            else:
+                errors.append(f"{m}: {err}")
+                print(f"[preload] {m} 失败: {err}", flush=True)
+        except Exception as e:
+            errors.append(f"{model}: {e}")
+            print(f"[preload] {model} 异常: {e}", flush=True)
 
     print(f"[preload] 预抓取完成: {success}/{len(MODEL_CONFIG)} 个型号", flush=True)
     if errors:
@@ -653,9 +669,12 @@ def stop_preload_thread():
 
 def refresh_capacity_data():
     """手动刷新产能数据：清除所有缓存并重新预加载所有型号
-    返回 (success_count, total_count, error_msg)"""
+    返回 (success_count, total_count, error_msg, token_status)"""
     import time as _time
     now = _time.time()
+
+    # 重置token状态
+    _set_token_status("unknown")
 
     # 1. 清除内存缓存
     with _memory_cache_lock:
@@ -684,9 +703,11 @@ def refresh_capacity_data():
     print(f"[refresh] 开始重新预加载 {len(MODEL_CONFIG)} 个型号...", flush=True)
     try:
         success = _preload_all_models()
-        print(f"[refresh] 刷新完成，成功加载 {success} 个型号", flush=True)
-        return success, len(MODEL_CONFIG), ""
+        token_status = get_token_status()
+        print(f"[refresh] 刷新完成，成功加载 {success} 个型号，token状态={token_status}", flush=True)
+        return success, len(MODEL_CONFIG), "", token_status
     except Exception as e:
         err_msg = str(e)
-        print(f"[refresh] 刷新异常: {e}", flush=True)
-        return 0, len(MODEL_CONFIG), err_msg
+        token_status = get_token_status()
+        print(f"[refresh] 刷新异常: {e}，token状态={token_status}", flush=True)
+        return 0, len(MODEL_CONFIG), err_msg, token_status
