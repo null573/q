@@ -205,10 +205,21 @@ def parse_date(date_str):
 
 
 def parse_number(val):
-    try:
-        return float(str(val).strip())
-    except:
+    s = str(val).strip() if val else ""
+    if not s:
         return None
+    try:
+        return float(s)
+    except:
+        pass
+    # 尝试从混合文字中提取第一个数字（如"35吨交xx"→35）
+    m = re.search(r'\d+(?:\.\d+)?', s)
+    if m:
+        try:
+            return float(m.group())
+        except:
+            pass
+    return None
 
 
 # ========== 内存缓存系统（核心优化） ==========
@@ -496,12 +507,18 @@ def calculate_delivery_date(model, tonnage_str, expected_date_str, occupied_capa
 
     for d, cap in date_capacity_map.items():
         if expected_date <= d <= limit_date:
-            filtered_caps.append(cap)
-            if cap < tonnage:
-                low_cap_dates.append(d)
+            # 产能<=0视为公式未计算完成，不参与判断
+            if cap > 0:
+                filtered_caps.append(cap)
+                if cap < tonnage:
+                    low_cap_dates.append(d)
 
     if not filtered_caps:
         max_data_date = max(date_capacity_map.keys())
+        # 检查是否所有产能都<=0（公式未计算完成）
+        all_zero = all(cap <= 0 for cap in date_capacity_map.values() if cap is not None)
+        if all_zero and date_capacity_map:
+            return "请联系商务支持", "产能公式正在计算中，请稍后重试"
         return "请联系商务支持", f"排产数据只到{max_data_date.strftime('%m月%d日')}，期望日期{expected_date_str}超出范围"
 
     if min(filtered_caps) >= tonnage:
