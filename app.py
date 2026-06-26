@@ -453,23 +453,32 @@ def read_sheet_range(sheet_id, range_str, file_id=None):
     return {}
 
 
-def get_next_empty_row(sheet_id, start_from=2):
+def get_next_empty_row(sheet_id, start_from=2, max_batches=4):
     """获取表格下一个空行号（1-based），从A列第一个空行开始扫描（跳过表头第1行）
     优化：增大批次到500行，减少API调用次数；添加30秒缓存
-    安全：start_from 参数允许调用方指定从哪行开始扫描，避免多人并发时依赖全局缓存"""
+    安全：start_from 参数允许调用方指定从哪行开始扫描，避免多人并发时依赖全局缓存
+    快速失败：API无响应时立即返回默认行号，避免阻塞请求"""
     global _empty_row_cache
     now = time.time()
     # 缓存命中：30秒内直接返回缓存的空行位置
     if _empty_row_cache["row"] >= start_from and (now - _empty_row_cache["timestamp"]) < EMPTY_ROW_CACHE_TTL:
         return _empty_row_cache["row"]
 
-    batch_size = 500
+    batch_size = 200  # 减小批次，更快发现空行
+    batches_done = 0
     for offset in range(start_from - 1, 2000, batch_size):
+        batches_done += 1
+        if batches_done > max_batches:
+            break
         start = offset + 1  # 1-based
         end = offset + batch_size
         range_str = f"A{start}:A{end}"
         grid_data = read_sheet_range(sheet_id, range_str)
         rows = grid_data.get("rows", [])
+
+        # API返回空数据时立即终止，避免无效扫描
+        if not rows:
+            break
 
         for i in range(len(rows)):
             row = rows[i]
@@ -488,8 +497,16 @@ def get_next_empty_row(sheet_id, start_from=2):
                 _empty_row_cache = {"row": actual_row, "timestamp": now}
                 return actual_row
 
-    _empty_row_cache = {"row": 2001, "timestamp": now}
-    return 2001  # 如果前2000行都满了
+        # 返回数据不足一个批次，说明已到表格末尾，下一行就是空行
+        if len(rows) < batch_size:
+            actual_row = start + len(rows)
+            _empty_row_cache = {"row": actual_row, "timestamp": now}
+            return actual_row
+
+    # 扫描失败或达到上限，返回一个安全的默认行号
+    default_row = start_from
+    _empty_row_cache = {"row": default_row, "timestamp": now}
+    return default_row
 
 
 def batch_update(requests_body):
@@ -639,15 +656,18 @@ def read_calculated_date_from_row(row_index_1based):
 
 def _find_user_temp_row_in_sheet(submitter_id):
     """扫描腾讯表格，查找该用户的临时行（Render重启后内存缓存丢失时的兜底）
-    条件：A列有值（型号），F列为空（未提交排队），K列等于submitter_id
+    条件：A列有值（型号），F列为空（未提交排队）
+    优化：一次性读取A:F列，避免逐行API调用
     """
+    if not submitter_id:
+        return 0
     try:
         batch_size = 50
         for offset in range(0, 2000, batch_size):
             start = offset + 1
             end = offset + batch_size
-            # 读取A/F/K列
-            range_str = f"A{start}:A{end}"
+            # 一次性读取A:F列（避免逐行API调用）
+            range_str = f"A{start}:F{end}"
             grid_data = read_sheet_range(SHEET_ID, range_str)
             rows = grid_data.get("rows", [])
             if not rows:
@@ -660,26 +680,25 @@ def _find_user_temp_row_in_sheet(submitter_id):
                 values = rows[i].get("values", [])
                 if not values:
                     continue
-                cv = values[0].get("cellValue")
-                if cv:
-                    a_val = parse_cell_value(cv)
-                    if a_val and a_val.strip():
-                        # A列有值，检查F列是否为空（未提交）
-                        f_range = f"F{actual_row}:F{actual_row}"
-                        f_grid = read_sheet_range(SHEET_ID, f_range)
-                        f_rows = f_grid.get("rows", [])
-                        f_val = ""
-                        if f_rows and f_rows[0].get("values"):
-                            f_cv = f_rows[0]["values"][0].get("cellValue")
-                            if f_cv:
-                                f_val = parse_cell_value(f_cv)
-                        if not f_val.strip():
-                            return actual_row
+                # A列：索引0，F列：索引5
+                a_val = ""
+                f_val = ""
+                if len(values) > 0:
+                    a_cv = values[0].get("cellValue")
+                    if a_cv:
+                        a_val = parse_cell_value(a_cv).strip()
+                if len(values) > 5:
+                    f_cv = values[5].get("cellValue")
+                    if f_cv:
+                        f_val = parse_cell_value(f_cv).strip()
+
+                if a_val and not f_val:
+                    return actual_row
 
             if len(rows) < batch_size:
                 break
     except Exception as e:
-        print(f"[find_temp_row] 扫描临时行失败: {e}", flush=True)
+        print(f"[find_temp_row] 扫描异常: {e}", flush=True)
     return 0
 
 
@@ -952,6 +971,9 @@ def _get_pending_rows():
 @require_auth
 def calculate_date():
     """计算可发货日期：直接本地计算，不再写入腾讯表格触发公式"""
+    request_start = time.time()
+    MAX_REQUEST_TIME = 8  # 总请求时间上限8秒，超过则快速返回
+
     try:
         data = request.json or {}
         model = (data.get('model') or '').strip()
@@ -962,16 +984,17 @@ def calculate_date():
         submitter_id = (data.get('submitter_id') or '').strip()
         force_refresh = bool(data.get('force_refresh', False))
 
-        import time
+        def _elapsed():
+            return time.time() - request_start
+
         now = time.time()
 
         # 1. 缓存快速路径检查（在计算之前）
         cache_key = f"{model}:{tonnage}:{expected_date}"
         if not force_refresh:
-            import time as _time_module_calc
             if (_calc_result_cache.get("key") == cache_key
                 and _calc_result_cache.get("result")
-                and _time_module_calc.time() - _calc_result_cache.get("timestamp", 0) < _CALC_CACHE_TTL):
+                and time.time() - _calc_result_cache.get("timestamp", 0) < _CALC_CACHE_TTL):
                 return jsonify({
                     "success": True,
                     "calculated_date": _calc_result_cache["result"],
@@ -980,9 +1003,8 @@ def calculate_date():
                 })
 
         # 2. 核心计算（最关键路径，只做必要的API调用）
-        start_time = time.time()
         calculated_date, error_msg = calculate_delivery_date(model, tonnage, expected_date)
-        calc_time_ms = round((time.time() - start_time) * 1000, 2)
+        calc_time_ms = round((time.time() - now) * 1000, 2)
 
         if error_msg:
             return jsonify({
@@ -991,13 +1013,7 @@ def calculate_date():
                 "row_index": int(pending_row_index) if pending_row_index else 0
             })
 
-        # 3. 清理超时的临时行（非关键路径，失败不影响结果）
-        try:
-            _cleanup_expired_temp_rows()
-        except Exception as e:
-            print(f"[calculate_date] _cleanup_expired_temp_rows 失败: {e}", flush=True)
-
-        # 4. 确定目标行（非关键路径，失败不影响计算结果）
+        # 3. 快速确定目标行（非关键路径，失败不影响计算结果）
         target_row = int(pending_row_index) if pending_row_index else 0
         temp_key = f"{submitter_id}"
 
@@ -1008,25 +1024,27 @@ def calculate_date():
                     if now - tracked["timestamp"] < _TEMP_ROW_TIMEOUT:
                         target_row = tracked["row_index"]
 
-        if target_row == 0 and submitter_id:
+        # 如果内存中没有临时行且还有时间，快速扫描表格
+        if target_row == 0 and submitter_id and _elapsed() < MAX_REQUEST_TIME - 3:
             try:
                 target_row = _find_user_temp_row_in_sheet(submitter_id)
             except Exception as e:
                 print(f"[calculate_date] _find_user_temp_row_in_sheet 失败: {e}", flush=True)
                 target_row = 0
 
-        if target_row == 0:
+        # 如果还没找到行号且还有时间，获取下一个空行
+        if target_row == 0 and _elapsed() < MAX_REQUEST_TIME - 2:
             try:
-                target_row = get_next_empty_row(SHEET_ID, start_from=2)
-                try:
-                    ensure_sheet_rows(target_row + 10)
-                except:
-                    pass
+                target_row = get_next_empty_row(SHEET_ID, start_from=2, max_batches=2)
             except Exception as e:
                 print(f"[calculate_date] get_next_empty_row 失败: {e}", flush=True)
                 target_row = 3  # 默认行号
 
-        # 5. 记录临时行信息
+        # 最终兜底
+        if target_row == 0:
+            target_row = 3
+
+        # 4. 记录临时行信息（内存操作，无API调用）
         with _temp_row_lock:
             _temp_row_tracker[temp_key] = {
                 "row_index": target_row,
@@ -1034,7 +1052,7 @@ def calculate_date():
                 "submitter_id": submitter_id
             }
 
-        # 6. 更新缓存
+        # 5. 更新缓存（内存操作）
         if not force_refresh:
             _calc_result_cache["key"] = cache_key
             _calc_result_cache["result"] = calculated_date
