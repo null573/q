@@ -540,7 +540,7 @@ def calculate_delivery_date(model, tonnage_str, expected_date_str, occupied_capa
     last_end = last_interval[1]
 
     if last_end < limit_date:
-        return "请联系商务支持", "最后一个产能充足区间未覆盖到上限日期"
+        return "请联系商务支持", "请联系商务支持"
 
     result_date = last_interval[0]
 
