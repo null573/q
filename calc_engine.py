@@ -539,6 +539,11 @@ def calculate_delivery_date(model, tonnage_str, expected_date_str, occupied_capa
     last_interval = intervals[-1]
     result_date = last_interval[0]
 
+    # 临时诊断：C310+70吨时返回详细计算过程
+    if model == "C310" and tonnage == 70:
+        caps_info = [(str(d), date_capacity_map.get(d, 0)) for d in sorted_dates]
+        return result_date.strftime("%Y-%m-%d"), f"诊断：limit={limit_date} intervals={[(str(s),str(e)) for s,e in intervals]} caps={caps_info[:10]}..."
+
     if result_date == expected_date:
         return expected_date_str, ""
     return result_date.strftime("%Y-%m-%d"), ""
