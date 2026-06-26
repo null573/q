@@ -485,7 +485,7 @@ def calculate_delivery_date(model, tonnage_str, expected_date_str, occupied_capa
     result_date = max_low_date + timedelta(days=1)
 
     if result_date > limit_date:
-        return "请联系商务支持", "计算日期超出上限"
+        return "请联系商务支持", "请联系商务支持"
 
     return result_date.strftime("%Y-%m-%d"), ""
 
