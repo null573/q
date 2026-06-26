@@ -379,6 +379,12 @@ def get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count):
 _limit_date_cache = {}
 _LIMIT_DATE_CACHE_TTL = 300
 
+# 计算结果缓存
+_calc_result_cache = {}
+
+# 空行缓存
+_empty_row_cache = {"row": 0, "timestamp": 0}
+
 
 def _read_limit_date(sheet_id, limit_cell):
     cache_key = f"{sheet_id}:{limit_cell}"
