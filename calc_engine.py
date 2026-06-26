@@ -526,13 +526,18 @@ def _preload_all_models():
                 success += 1
                 continue  # 跳过，已有有效缓存
 
-            capacity_col_index = col_letter_to_index(capacity_col)
             end_row = start_row + row_count - 1
-            range_str = f"A{start_row}:{capacity_col}{end_row}"
-            grid_data = read_sheet_range(sheet_id, range_str)
-            rows = grid_data.get("rows", [])
 
-            if not rows:
+            # 优化：分两次读取，每次只读一列，避免大数据量超时
+            date_range = f"A{start_row}:A{end_row}"
+            date_grid = read_sheet_range(sheet_id, date_range)
+            date_rows = date_grid.get("rows", [])
+
+            cap_range = f"{capacity_col}{start_row}:{capacity_col}{end_row}"
+            cap_grid = read_sheet_range(sheet_id, cap_range)
+            cap_rows = cap_grid.get("rows", [])
+
+            if not date_rows and not cap_rows:
                 consecutive_failures += 1
                 continue
 
@@ -541,28 +546,27 @@ def _preload_all_models():
             date_capacity_map = {}
             dates_cached = []
 
-            for row in rows:
-                values = row.get("values", [])
-                if len(values) < capacity_col_index + 1:
-                    dates_cached.append(None)
-                    continue
+            max_rows = max(len(date_rows), len(cap_rows))
+            for i in range(max_rows):
+                d = None
+                if i < len(date_rows):
+                    date_values = date_rows[i].get("values", [])
+                    if date_values:
+                        cv = date_values[0].get("cellValue")
+                        if cv:
+                            date_val = parse_cell_value(cv)
+                            d = parse_date(date_val)
+                dates_cached.append(d)
 
-                cv = values[0].get("cellValue")
-                if cv:
-                    date_val = parse_cell_value(cv)
-                    d = parse_date(date_val)
-                    dates_cached.append(d)
-                else:
-                    dates_cached.append(None)
-                    continue
-
-                cv = values[capacity_col_index].get("cellValue")
-                if not cv:
-                    continue
-                cap_str = parse_cell_value(cv)
-                cap_val = parse_number(cap_str)
-                if cap_val is not None:
-                    date_capacity_map[d] = cap_val
+                if d is not None and i < len(cap_rows):
+                    cap_values = cap_rows[i].get("values", [])
+                    if cap_values:
+                        cv = cap_values[0].get("cellValue")
+                        if cv:
+                            cap_str = parse_cell_value(cv)
+                            cap_val = parse_number(cap_str)
+                            if cap_val is not None:
+                                date_capacity_map[d] = cap_val
 
             # 读取上限日期
             limit_date = _read_limit_date(sheet_id, limit_cell)
@@ -584,6 +588,7 @@ def _preload_all_models():
             print(f"[preload] {model} 预抓取失败: {e}", flush=True)
 
     print(f"[preload] 预抓取完成: {success}/{len(MODEL_CONFIG)} 个型号", flush=True)
+    return success
 
 
 def _preload_worker():
@@ -659,9 +664,9 @@ def refresh_capacity_data():
     # 6. 重新预加载所有型号
     print(f"[refresh] 开始重新预加载 {len(MODEL_CONFIG)} 个型号...", flush=True)
     try:
-        _preload_all_models()
-        print(f"[refresh] 刷新完成", flush=True)
-        return len(MODEL_CONFIG), len(MODEL_CONFIG), ""
+        success = _preload_all_models()
+        print(f"[refresh] 刷新完成，成功加载 {success} 个型号", flush=True)
+        return success, len(MODEL_CONFIG), ""
     except Exception as e:
         err_msg = str(e)
         print(f"[refresh] 刷新异常: {e}", flush=True)
