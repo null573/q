@@ -57,6 +57,13 @@
         <div id="adminAlertBar" class="admin-alert-bar" style="display:none;"></div>
 
         <div id="createTab" class="tab-content active">
+            <div class="form-toolbar">
+                <span class="form-toolbar-title">提交排队</span>
+                <button type="button" class="btn-refresh-mini" id="refreshCapacityBtn" onclick="refreshCapacityData()" title="刷新产能数据">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                    刷新产能
+                </button>
+            </div>
             <form id="orderForm" class="order-form" autocomplete="off">
                 <div class="form-row">
                     <div class="form-group form-col">
@@ -95,7 +102,6 @@
 
                 <div class="form-actions">
                     <button type="submit" class="btn-submit">提交排队</button>
-                    <button type="button" class="btn-refresh" id="refreshCapacityBtn" onclick="refreshCapacityData()">刷新产能</button>
                     <button type="reset" class="btn-reset">重置</button>
                 </div>
             </form>
@@ -231,7 +237,7 @@
 
     <div id="toast" class="toast"></div>
 
-    <script src="{{ url_for('static', filename='js/app.v49.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app.v50.js') }}"></script>
 </body>
 </html>
 
