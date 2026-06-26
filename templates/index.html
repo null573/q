@@ -95,6 +95,7 @@
 
                 <div class="form-actions">
                     <button type="submit" class="btn-submit">提交排队</button>
+                    <button type="button" class="btn-refresh" id="refreshCapacityBtn" onclick="refreshCapacityData()">刷新产能</button>
                     <button type="reset" class="btn-reset">重置</button>
                 </div>
             </form>
@@ -230,7 +231,7 @@
 
     <div id="toast" class="toast"></div>
 
-    <script src="{{ url_for('static', filename='js/app.v48.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app.v49.js') }}"></script>
 </body>
 </html>
 

@@ -625,3 +625,44 @@ def stop_preload_thread():
         _preload_stop_event.set()
         _preload_thread.join(timeout=5)
         _preload_thread = None
+
+
+def refresh_capacity_data():
+    """手动刷新产能数据：清除所有缓存并重新预加载所有型号
+    返回 (success_count, total_count, error_msg)"""
+    import time as _time
+    now = _time.time()
+
+    # 1. 清除内存缓存
+    with _memory_cache_lock:
+        _memory_cache.clear()
+        print(f"[refresh] 内存缓存已清除", flush=True)
+
+    # 2. 清除预加载缓存
+    with _preload_cache_lock:
+        _preload_cache.clear()
+        print(f"[refresh] 预加载缓存已清除", flush=True)
+
+    # 3. 清除上限日期缓存
+    _limit_date_cache.clear()
+    print(f"[refresh] 上限日期缓存已清除", flush=True)
+
+    # 4. 清除计算结果缓存
+    _calc_result_cache.clear()
+    print(f"[refresh] 计算结果缓存已清除", flush=True)
+
+    # 5. 清除空行缓存
+    global _empty_row_cache
+    _empty_row_cache = {"row": 0, "timestamp": 0}
+    print(f"[refresh] 空行缓存已清除", flush=True)
+
+    # 6. 重新预加载所有型号
+    print(f"[refresh] 开始重新预加载 {len(MODEL_CONFIG)} 个型号...", flush=True)
+    try:
+        _preload_all_models()
+        print(f"[refresh] 刷新完成", flush=True)
+        return len(MODEL_CONFIG), len(MODEL_CONFIG), ""
+    except Exception as e:
+        err_msg = str(e)
+        print(f"[refresh] 刷新异常: {e}", flush=True)
+        return 0, len(MODEL_CONFIG), err_msg

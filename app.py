@@ -9,7 +9,7 @@ import functools
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from calc_engine import MODEL_CONFIG, calculate_delivery_date, set_token_getter, start_preload_thread
+from calc_engine import MODEL_CONFIG, calculate_delivery_date, set_token_getter, start_preload_thread, refresh_capacity_data
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
@@ -2269,6 +2269,38 @@ def diag_calc_engine():
     }
     
     return jsonify({"success": True, "results": results})
+
+
+@app.route('/api/refresh-capacity-data', methods=['POST'])
+@require_auth
+def refresh_capacity_data_api():
+    """手动刷新产能数据：清除所有缓存并在后台线程重新加载所有型号"""
+    import threading
+    from calc_engine import _preload_cache, _preload_cache_lock, _memory_cache, _memory_cache_lock
+
+    # 获取刷新前缓存状态
+    with _preload_cache_lock:
+        preload_count = len(_preload_cache)
+    with _memory_cache_lock:
+        mem_count = len(_memory_cache)
+
+    def _do_refresh():
+        try:
+            refresh_capacity_data()
+        except Exception as e:
+            print(f"[refresh-api] 后台刷新异常: {e}", flush=True)
+
+    # 在后台线程执行刷新，避免阻塞HTTP响应
+    threading.Thread(target=_do_refresh, daemon=True).start()
+
+    return jsonify({
+        "success": True,
+        "message": f"产能数据刷新已启动（后台线程正在重新加载 {len(MODEL_CONFIG)} 个型号）",
+        "before_refresh": {
+            "preloaded_models": preload_count,
+            "memory_cache_entries": mem_count
+        }
+    })
 
 
 def read_sheet_range_app(sheet_id, range_str, file_id=None):

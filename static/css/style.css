@@ -403,7 +403,8 @@ body {
 
 .btn-submit,
 .btn-reset,
-.btn-cancel {
+.btn-cancel,
+.btn-refresh {
     flex: 1;
     padding: 14px;
     border: none;
@@ -426,9 +427,22 @@ body {
     color: #536079;
 }
 
+.btn-refresh {
+    background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+    color: white;
+    box-shadow: 0 8px 18px rgba(59,130,246,0.22);
+}
+
+.btn-refresh:disabled {
+    background: #9ca3af;
+    cursor: not-allowed;
+    box-shadow: none;
+}
+
 .btn-submit:active,
 .btn-reset:active,
-.btn-cancel:active {
+.btn-cancel:active,
+.btn-refresh:active {
     transform: scale(0.98);
 }
 
