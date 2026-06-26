@@ -878,7 +878,7 @@ def get_models():
         models = list(dict.fromkeys(models + list(MODEL_CONFIG.keys())))
         _models_cache["data"] = models
         _models_cache["timestamp"] = now
-        return jsonify({"success": True, "models": models})
+        return jsonify({"success": True, "models": models, "version": "v2.1-opt"})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
